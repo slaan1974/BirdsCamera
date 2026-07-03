@@ -204,5 +204,8 @@ calibration_*.npy
 args.yaml
 results.csv
 
+# Script logs (team1, team2, support, cleanup)
+logs/
+
 # CI test asset cache
 .ultralytics_cache/

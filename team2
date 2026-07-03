@@ -1,0 +1,2162 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Ultralytics YOLO Team 2 — Wildlife Detection (Pi 4 + Camera v2)
+# Raspberry Pi 4 + Pi Camera v2 — periodic capture, YOLO inference,
+# class filter (person/cat/bird), web gallery with settings panel.
+# NO Docker — runs natively on Pi OS.
+# ==============================================================================
+# Usage:
+#   ./team2              Full setup (install deps, create venv, export model, enable service)
+#   ./team2 wildlife     Run wildlife detection in foreground (testing)
+#   ./team2 status       Show deployment status
+#   ./team2 logs         Follow live inference logs
+#   ./team2 gallery      Start web gallery for detection images (port 5000)
+#   ./team2 snapshot     Capture a single test frame (via rpicam-jpeg)
+#   ./team2 camera-test  Quick camera validation via rpicam-hello
+#   ./team2 stop         Stop the service
+#   ./team2 start        Start the service
+#   ./team2 restart      Restart the service
+# ==============================================================================
+set -euo pipefail
+
+# ── Force UTF-8 encoding ────────────────────────────────────────────────────────
+# Pi OS defaults to ISO-8859-15, but Ultralytics logging uses emoji/unicode
+# (U+1F680 rocket, U+2705 checkmark, U+26A0 warning, U+2014 em dash, etc.)
+# Setting these prevents UnicodeEncodeError crashes in Python heredocs and
+# the Ultralytics export pipeline.
+export PYTHONIOENCODING=utf-8
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+PI_USER="${USER:-pi}"
+HOME_DIR="/home/${PI_USER}"
+BASE_DIR="${HOME_DIR}/ultralytics-local"
+RESULTS_DIR="${BASE_DIR}/results"
+MODELS_DIR="${BASE_DIR}/models"
+TMPDIR_DIR="${BASE_DIR}/tmp"
+MODEL_NAME="yolo26n"
+VENV_DIR="${BASE_DIR}/venv"
+SERVICE_NAME="ultralytics-wildlife.service"
+GALLERY_SERVICE_NAME="ultralytics-gallery.service"
+INFERENCE_SCRIPT="${BASE_DIR}/run_wildlife.py"
+# Wildlife detection config (can be overridden via env when running)
+CAPTURE_INTERVAL=5     # seconds between capture+inference cycles
+TARGET_CLASSES="0"  # COCO class IDs: person(0), cat(15), bird(16)
+GALLERY_SCRIPT="${BASE_DIR}/web_gallery.py"
+SENTINEL_DIR="${BASE_DIR}/.setup"
+SENTINEL_APT="${SENTINEL_DIR}/.apt_done"
+
+# DATA_DRIVE — redirect results to exFAT partition (set DATA_DRIVE=true in env)
+DATA_DRIVE_MOUNT="/mnt/wildlife-data"
+DATA_DRIVE_SENTINEL=".wildlife_data_sentinel"
+if [ "${DATA_DRIVE:-false}" = "true" ]; then
+    RESULTS_DIR="${DATA_DRIVE_MOUNT}/team2"
+fi
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+info()  { echo -e "${GREEN}$(date '+%Y-%m-%d %H:%M:%S') [${SCRIPT_NAME}] [INFO]${NC}  $1"; }
+warn()  { echo -e "${YELLOW}$(date '+%Y-%m-%d %H:%M:%S') [${SCRIPT_NAME}] [WARN]${NC}  $1"; }
+error() { echo -e "${RED}$(date '+%Y-%m-%d %H:%M:%S') [${SCRIPT_NAME}] [ERROR]${NC} $1" >&2; }
+
+# ── Logging Setup ────────────────────────────────────────────────────────────
+SCRIPT_NAME="team2"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_DIR="${SCRIPT_DIR}/logs"
+mkdir -p "${LOG_DIR}"
+LOG_FILE="${LOG_DIR}/$(date +%Y%m%d_%H%M%S)_${SCRIPT_NAME}.log"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+# ── Pre-flight Checks ─────────────────────────────────────────────────────────
+check_prereqs() {
+    echo ""
+    info "Checking prerequisites..."
+
+    if [ "$(whoami)" = "root" ]; then
+        error "Do not run as root. Run as the regular Pi user (e.g. pi)."
+        exit 1
+    fi
+    info "User: $(whoami)"
+
+    local arch
+    arch=$(uname -m)
+    if [ "$arch" = "aarch64" ]; then
+        info "Architecture: ${arch} (ARM64)"
+    else
+        error "Expected aarch64, got ${arch}. This script is for Pi 4/5 64-bit OS."
+        exit 1
+    fi
+
+    if ! ls /dev/video* &>/dev/null; then
+        error "No /dev/video* devices found. Connect and enable the camera:"
+        error "  sudo raspi-config  → Interface Options → Camera → Enable → Reboot"
+        exit 1
+    fi
+    info "Camera devices: $(ls /dev/video* 2>/dev/null | tr '\n' ' ')"
+
+    if command -v rpicam-hello &>/dev/null; then
+        info "rpicam-hello found: $(rpicam-hello --version 2>&1 | head -1 || echo 'available')"
+    else
+        warn "rpicam-hello not found — install: sudo apt install rpicam-apps"
+    fi
+
+    info "All prerequisites met"
+}
+
+# ── Directory Setup ────────────────────────────────────────────────────────────
+setup_dirs() {
+    echo ""
+    info "Setting up directories..."
+    mkdir -p "${RESULTS_DIR}" "${MODELS_DIR}"
+    info "Base:       ${BASE_DIR}"
+    info "Models:     ${MODELS_DIR}"
+    info "Results:    ${RESULTS_DIR}"
+}
+
+# ── Data Drive Setup (when DATA_DRIVE=true) ─────────────────────────────────
+setup_data_drive() {
+    if [ "${DATA_DRIVE:-false}" != "true" ]; then
+        return
+    fi
+    echo ""
+    info "Data drive mode enabled (DATA_DRIVE=true)"
+
+    if ! mountpoint -q "${DATA_DRIVE_MOUNT}" 2>/dev/null; then
+        warn "${DATA_DRIVE_MOUNT} is not mounted"
+        warn "  Run ./setup-data-drive.sh sd first, or mount the exFAT partition manually"
+        warn "  Falling back to default results directory"
+        RESULTS_DIR="${BASE_DIR}/results"
+        return
+    fi
+
+    if [ ! -f "${DATA_DRIVE_MOUNT}/${DATA_DRIVE_SENTINEL}" ]; then
+        warn "Sentinel file '${DATA_DRIVE_SENTINEL}' not found on ${DATA_DRIVE_MOUNT}"
+        warn "  Run ./setup-data-drive.sh sd to initialise the data partition"
+        warn "  Falling back to default results directory"
+        RESULTS_DIR="${BASE_DIR}/results"
+        return
+    fi
+
+    mkdir -p "${RESULTS_DIR}"
+    local nframes
+    nframes=$(ls -1 "${RESULTS_DIR}"/detect_*.jpg 2>/dev/null | wc -l)
+    info "Data drive: ${DATA_DRIVE_MOUNT} (${nframes} existing detection files)"
+}
+
+# ── Install System Dependencies & Python Venv ─────────────────────────────────
+install_deps() {
+    if [ -f "${SENTINEL_APT}" ]; then
+        info "System dependencies already installed (delete ${SENTINEL_APT} or use --force to redo)"
+        source "${VENV_DIR}/bin/activate" 2>/dev/null || true
+        return
+    fi
+    echo ""
+    info "Installing system packages..."
+    sudo apt update
+    sudo apt install -y python3-pip python3-venv python3-picamera2 \
+        libgl1 libglib2.0-0 rpicam-apps libcap-dev
+
+    echo ""
+    info "Creating pip temp directory on SD card (not tmpfs)..."
+    mkdir -p "${TMPDIR_DIR}"
+    export TMPDIR="${TMPDIR_DIR}"
+
+    info "Creating Python virtual environment (with system packages for picamera2/libcamera)..."
+    # --system-site-packages is required because libcamera (a picamera2 dependency)
+    # is only available as an apt package (python3-libcamera), not on pip.
+    python3 -m venv --system-site-packages "${VENV_DIR}"
+    source "${VENV_DIR}/bin/activate"
+
+    info "Upgrading pip..."
+    pip install -U pip
+
+    info "Installing CPU-only PyTorch for Pi 4 (avoid Jetson CUDA builds)..."
+    # Clear any cached CUDA torch wheels — these crash on Pi 4 with "Illegal instruction"
+    pip cache remove torch* 2>/dev/null || true
+    # Use CPU-only index exclusively. CUDA builds (+cuNNN) contain x86-specific
+    # instructions (AVX/AVX2/FMA) that the Cortex-A72 doesn't support.
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu \
+        --no-cache-dir --force-reinstall
+
+    # Verify we got a CPU build; CUDA builds will crash at export/inference time
+    info "Verifying PyTorch build..."
+    python3 -c "
+import torch, sys
+v = torch.__version__
+if 'cu' in v:
+    print(f'ERROR: got CUDA build ({v}) instead of CPU build — will crash on Pi 4')
+    print('Falling back to pinned version with known aarch64 support...')
+    sys.exit(1)
+print(f'PyTorch {v} (CPU) OK')
+" || {
+        warn "CPU index did not provide aarch64 wheels for latest version, trying 2.4.0..."
+        pip install torch==2.4.0 torchvision==0.19.0 \
+            --index-url https://download.pytorch.org/whl/cpu \
+            --no-cache-dir --force-reinstall
+        python3 -c "
+import torch
+v = torch.__version__
+assert 'cu' not in v, f'Still got CUDA build: {v}'
+print(f'PyTorch {v} (CPU) OK')
+"
+    }
+
+    info "Installing Ultralytics with export dependencies..."
+    pip install ultralytics[export]
+    # Fix: portalocker required by ncnn; send2trash needs --ignore-installed
+    # to override the buggy system package in /usr/lib/python3/dist-packages
+    pip install portalocker
+    pip install "send2trash>=1.8.2,<2.0.0" --ignore-installed
+
+    info "Cleaning up pip cache and temp files..."
+    pip cache purge
+    rm -rf "${TMPDIR_DIR:?}"/*
+    mkdir -p "${SENTINEL_DIR}"
+    touch "${SENTINEL_APT}"
+    info "Dependencies installed"
+}
+
+# ── Export NCNN Model ──────────────────────────────────────────────────────────
+export_model() {
+    echo ""
+    info "Exporting YOLO${MODEL_NAME#yolo} to NCNN (may take 5-15 min on Pi 4)..."
+    source "${VENV_DIR}/bin/activate"
+    export TMPDIR="${TMPDIR_DIR}"
+
+    python3 << PYEOF
+import os, shutil
+from ultralytics import YOLO
+
+model = YOLO("${MODEL_NAME}.pt")
+model.export(format="ncnn", imgsz=320)
+
+# Model is saved by Ultralytics to the current working directory
+cwd = os.getcwd()
+src = os.path.join(cwd, "${MODEL_NAME}_ncnn_model")
+dst = os.path.expanduser("${MODELS_DIR}/${MODEL_NAME}_ncnn_model")
+
+if os.path.isdir(src):
+    if os.path.isdir(dst):
+        shutil.rmtree(dst)
+    shutil.move(src, dst)
+    print(f"Model moved to {dst}")
+else:
+    # Fallback: check home dir (some Ultralytics versions save there)
+    alt = os.path.expanduser("~/${MODEL_NAME}_ncnn_model")
+    if os.path.isdir(alt):
+        if os.path.isdir(dst):
+            shutil.rmtree(dst)
+        shutil.move(alt, dst)
+        print(f"Model moved from {alt} to {dst}")
+    else:
+        print(f"Model directory not found at {src} or {alt}")
+        print(f"Contents of CWD: {os.listdir(cwd)}")
+        dirs = [d for d in os.listdir(cwd) if d.endswith("_ncnn_model")]
+        if dirs:
+            print(f"Found NCNN model dirs in CWD: {dirs}")
+        raise FileNotFoundError(f"Cannot find exported NCNN model: ${MODEL_NAME}_ncnn_model")
+PYEOF
+
+    info "Model exported to ${MODELS_DIR}/${MODEL_NAME}_ncnn_model"
+}
+
+# ── Create Inference Script ────────────────────────────────────────────────────
+create_inference_script() {
+    echo ""
+    info "Creating inference script..."
+
+    cat > "${INFERENCE_SCRIPT}" << 'PYEOF'
+#!/usr/bin/env python3
+"""Wildlife detection — Pi 4 + Camera v2.
+
+Captures a frame every CAPTURE_INTERVAL seconds, runs YOLO inference,
+and filters for target classes (default: person, cat, bird).
+Saves annotated image + JSONL entry only when targets are detected.
+Frames with no matching detections are silently discarded.
+
+All settings have defaults and can be overridden via config.json
+(written by web gallery settings panel at runtime) or env vars.
+
+Environment variables (all optional):
+  CAPTURE_INTERVAL=N  Seconds between capture+inference cycles (default: 5)
+  CONF_THRESH=N       Confidence threshold (default: 0.25)
+  IOU_THRESH=N        IoU threshold (default: 0.45)
+  IMGSZ=N             Inference image size (default: 320)
+  TARGET_CLASSES=N    Comma-separated COCO class IDs (default: 0,15,16)
+  MAX_FIFO=N          Max saved images before oldest deleted (default: 1000)
+  MIN_FREE_SPACE_GB=N Minimum free space to keep on device (default: 1)
+"""
+
+import os
+import sys
+import time
+import json
+import signal
+import logging
+import glob
+
+import cv2
+from picamera2 import Picamera2
+from ultralytics import YOLO
+
+# ── Config file (shared with web gallery) ──────────────────────────────────
+CONFIG_FILE = os.path.join(os.path.expanduser("~"),
+                           "ultralytics-local", "results", "config.json")
+CONFIG_DEFAULTS = {
+    "capture_interval": 5,
+    "auto_refresh": 10,
+    "max_fifo": 1000,
+    "min_free_space_gb": 1,
+    "target_classes": [0],
+    "camera_resolution": "1920x1080",
+}
+
+
+def load_config():
+    """Read config.json, falling back to env vars / defaults."""
+    cfg = dict(CONFIG_DEFAULTS)
+    if os.path.isfile(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE) as f:
+                cfg.update(json.load(f))
+        except Exception:
+            pass
+    # Env vars override file (for systemd / manual override)
+    cfg["capture_interval"] = int(os.environ.get("CAPTURE_INTERVAL", cfg["capture_interval"]))
+    cfg["max_fifo"] = int(os.environ.get("MAX_FIFO", cfg["max_fifo"]))
+    cfg["min_free_space_gb"] = float(os.environ.get("MIN_FREE_SPACE_GB", cfg["min_free_space_gb"]))
+    env_classes = os.environ.get("TARGET_CLASSES")
+    if env_classes:
+        cfg["target_classes"] = [int(x) for x in env_classes.split(",")]
+    return cfg
+
+
+def write_default_config():
+    """Write default config.json if it doesn't exist."""
+    if not os.path.isfile(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "w") as f:
+                json.dump(CONFIG_DEFAULTS, f, indent=2)
+            log.info("Wrote default config → %s", CONFIG_FILE)
+        except Exception as e:
+            log.warning("Could not write default config: %s", e)
+
+# ── Venv path (when running via systemd) ──
+VENV_SITE = os.path.expanduser("~/ultralytics-local/venv/lib/python3.*/site-packages")
+site_pkg = glob.glob(VENV_SITE)
+if site_pkg and site_pkg[0] not in sys.path:
+    sys.path.insert(0, site_pkg[0])
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+HOME = os.path.expanduser("~")
+MODEL_PATH  = os.path.join(HOME, "ultralytics-local", "models", "yolo26n_ncnn_model")
+OUTPUT_DIR  = os.path.join(HOME, "ultralytics-local", "results")
+CONF_THRESH = float(os.environ.get("CONF_THRESH", "0.25"))
+IOU_THRESH  = float(os.environ.get("IOU_THRESH", "0.45"))
+IMGSZ       = int(os.environ.get("IMGSZ", "320"))
+
+# Load dynamic config from config.json (overridable via env)
+CFG = load_config()
+
+# Fallback labels if model.names doesn't resolve (shouldn't happen with COCO)
+TARGET_NAMES = {0: "person", 15: "cat", 16: "bird"}
+
+running = True
+cam = None
+
+def signal_handler(signum, frame):
+    global running
+    logging.info("Received signal %d, shutting down...", signum)
+    running = False
+
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("wildlife")
+
+# ── Camera Initialisation ──────────────────────────────────────────────────────
+
+def _build_config(picam2, resolution):
+    """Return a picamera2 configuration for the given resolution string."""
+    if resolution == "3280x2464":
+        return picam2.create_still_configuration(
+            main={"size": (3280, 2464), "format": "RGB888"},
+        )
+    return picam2.create_preview_configuration(
+        main={"size": (1920, 1080), "format": "RGB888"},
+    )
+
+
+def init_camera(resolution="1920x1080"):
+    for attempt in range(5):
+        picam2 = None
+        try:
+            picam2 = Picamera2()
+            config = _build_config(picam2, resolution)
+            picam2.configure(config)
+            picam2.start()
+            time.sleep(2)
+            log.info("Camera initialised (picamera2) — %s", resolution)
+            return picam2
+        except Exception as e:
+            log.warning("Camera init attempt %d/5 failed: %s", attempt + 1, e)
+            if picam2 is not None:
+                try:
+                    picam2.close()
+                except Exception:
+                    pass
+            time.sleep(2)
+    raise RuntimeError("Could not initialise camera after 5 attempts")
+
+# ── FIFO cleanup ───────────────────────────────────────────────────────────────
+
+def fifo_cleanup(output_dir, max_entries, min_free_gb=1):
+    """Remove oldest entries until count <= max_entries AND free space >= min_free_gb."""
+    det_log = os.path.join(output_dir, "detections.jsonl")
+    if not os.path.isfile(det_log):
+        return
+    with open(det_log) as f:
+        entries = [json.loads(line) for line in f if line.strip()]
+    if not entries:
+        return
+
+    # Keep removing oldest until both conditions satisfied
+    while len(entries) > max_entries:
+        removed = entries.pop(0)
+        _remove_entry(output_dir, removed)
+
+    # Enforce free space floor
+    free_gb = _free_space_gb(output_dir)
+    while entries and free_gb < min_free_gb:
+        removed = entries.pop(0)
+        _remove_entry(output_dir, removed)
+        free_gb = _free_space_gb(output_dir)
+
+    # Rewrite JSONL with remaining entries
+    with open(det_log, "w") as f:
+        for e in entries:
+            f.write(json.dumps(e, sort_keys=True) + "\n")
+
+
+def _remove_entry(output_dir, entry):
+    fname = entry.get("frame_file", "")
+    if fname:
+        fpath = os.path.join(output_dir, fname)
+        if os.path.isfile(fpath):
+            os.remove(fpath)
+            log.info("FIFO removed %s", fname)
+
+
+def _free_space_gb(path):
+    try:
+        st = os.statvfs(path)
+        return st.f_frsize * st.f_bavail / (1024 ** 3)
+    except Exception:
+        return 999  # assume plenty on error
+
+# ── Main Loop ──────────────────────────────────────────────────────────────────
+
+def wait_interval(seconds):
+    """Sleep for `seconds` seconds, checking `running` every 1s."""
+    for _ in range(int(seconds)):
+        if not running:
+            break
+        time.sleep(1)
+
+
+def reconfig():
+    """Reload config from config.json into the global CFG.
+    Reconfigures existing camera if camera_resolution changed.
+    """
+    global CFG, cam
+    old_res = CFG.get("camera_resolution", "1920x1080")
+    CFG = load_config()
+    new_res = CFG.get("camera_resolution", "1920x1080")
+    if new_res != old_res:
+        log.info("DIAG: resolution change detected %s → %s", old_res, new_res)
+        if cam is not None:
+            log.info("DIAG: reconfig — stopping camera")
+            try:
+                cam.stop()
+                log.info("DIAG: reconfig — camera stopped OK")
+            except Exception as e:
+                log.warning("DIAG: reconfig — cam.stop() exception: %s", e)
+            try:
+                cam.close()
+            except Exception:
+                pass
+            cam = None
+        else:
+                log.info("DIAG: reconfig — cam is None, skipping stop/close")
+        new_cam = None
+        try:
+            log.info("DIAG: reconfig — creating new Picamera2")
+            new_cam = Picamera2()
+            config = _build_config(new_cam, new_res)
+            log.info("DIAG: reconfig — configuring camera")
+            new_cam.configure(config)
+            log.info("DIAG: reconfig — configured OK")
+            log.info("DIAG: reconfig — starting camera")
+            new_cam.start()
+            log.info("DIAG: reconfig — started OK, sleeping 2s")
+            time.sleep(2)
+            log.info("DIAG: reconfig — warm-up capture")
+            try:
+                warm = new_cam.capture_array()
+                log.info("DIAG: reconfig — warm-up frame shape=%s", warm.shape)
+            except Exception as e:
+                log.warning("DIAG: reconfig — warm-up capture failed: %s", e)
+            cam = new_cam
+            log.info("Camera reconfigured — %s", new_res)
+        except Exception as e:
+            log.error("DIAG: reconfig — FAILED: %s", e, exc_info=True)
+            if new_cam is not None:
+                try:
+                    new_cam.close()
+                except Exception:
+                    pass
+            raise
+    return CFG
+
+
+def main():
+    global running, CFG, cam
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    detections_log = os.path.join(OUTPUT_DIR, "detections.jsonl")
+    write_default_config()
+
+    log.info("Loading model from %s", MODEL_PATH)
+    model = YOLO(MODEL_PATH)
+    log.info("Model loaded")
+
+    cfg = reconfig()
+    target_labels = [model.names.get(c, TARGET_NAMES.get(c, str(c)))
+                     for c in cfg["target_classes"]]
+    log.info("Wildlife detection started (capture every %ds, targets: %s)",
+             cfg["capture_interval"], target_labels)
+
+    cam = init_camera(cfg.get("camera_resolution", "1920x1080"))
+    saved_count = 0
+    iter_count = 0
+
+    while running:
+        # Reload config periodically for responsive UI
+        iter_count += 1
+        if iter_count % 5 == 0:
+            cfg = reconfig()
+
+        try:
+            frame = cam.capture_array()
+            log.info("DIAG: loop — frame shape=%s dtype=%s", frame.shape, frame.dtype)
+        except Exception as e:
+            log.error("DIAG: loop — capture_array() failed: %s", e, exc_info=True)
+            time.sleep(1)
+            if cam is not None:
+                try:
+                    cam.stop()
+                except Exception:
+                    pass
+                try:
+                    cam.close()
+                except Exception:
+                    pass
+                cam = None
+            time.sleep(1)
+            cam = init_camera(CFG.get("camera_resolution", "1920x1080"))
+            log.info("DIAG: loop — camera reinitialised after capture failure")
+            continue
+
+        log.info("DIAG: loop — model inference starting (frame=%s)", frame.shape)
+        results = model(frame, imgsz=IMGSZ, conf=CONF_THRESH,
+                        iou=IOU_THRESH, verbose=False)
+        log.info("DIAG: loop — inference done")
+
+        # Annotate frame (always — for latest.jpg live view)
+        try:
+            annotated = results[0].plot()
+            log.info("DIAG: loop — plot() OK, annotated shape=%s", annotated.shape)
+        except Exception as e:
+            log.warning("DIAG: loop — plot() failed: %s, using raw frame", e)
+            annotated = frame
+
+        ts_str = time.strftime("%Y-%m-%d %H:%M:%S")
+        cv2.putText(annotated, ts_str, (10, annotated.shape[0] - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+
+        # Always save latest.jpg for the web gallery Live View
+        latest_path = os.path.join(OUTPUT_DIR, "latest.jpg")
+        if not cv2.imwrite(latest_path, annotated):
+            log.warning("DIAG: loop — FAILED to write latest.jpg")
+        else:
+            sz = os.path.getsize(latest_path)
+            log.info("DIAG: loop — wrote latest.jpg (%d bytes)", sz)
+
+        dets = results[0].boxes
+        has_detections = dets is not None and len(dets) > 0
+
+        if not has_detections:
+            log.debug("No detections — discarding")
+            wait_interval(cfg["capture_interval"])
+            continue
+
+        cls_ids = [int(c) for c in dets.cls.tolist()]
+        confs = [f"{c:.2f}" for c in dets.conf.tolist()]
+
+        # Filter to only target classes
+        matched_indices = [i for i, c in enumerate(cls_ids) if c in cfg["target_classes"]]
+
+        if not matched_indices:
+            log.debug("No target classes detected — discarding")
+            wait_interval(cfg["capture_interval"])
+            continue
+
+        # Save annotated image with timestamp in filename
+        ts_file = time.strftime("%Y%m%d_%H%M%S")
+        fname = f"detect_{ts_file}.jpg"
+        fpath = os.path.join(OUTPUT_DIR, fname)
+        cv2.imwrite(fpath, annotated)
+
+        # Build JSONL entry
+        matched_classes = [
+            model.names.get(cls_ids[i], TARGET_NAMES.get(cls_ids[i], str(cls_ids[i])))
+            for i in matched_indices
+        ]
+        matched_confs = [confs[i] for i in matched_indices]
+
+        entry = {
+            "timestamp": ts_str,
+            "frame_file": fname,
+            "targets": matched_classes,
+            "confidences": matched_confs,
+            "class_ids": [cls_ids[i] for i in matched_indices],
+        }
+        with open(detections_log, "a") as f:
+            f.write(json.dumps(entry, sort_keys=True) + "\n")
+
+        log.info("SAVED %s  targets: %s", fname, matched_classes)
+        saved_count += 1
+
+        # FIFO cleanup (count + free space)
+        fifo_cleanup(OUTPUT_DIR, cfg["max_fifo"], min_free_gb=cfg["min_free_space_gb"])
+
+        wait_interval(cfg["capture_interval"])
+
+    log.info("Shutdown — %d detection images saved", saved_count)
+    if cam is not None:
+        try:
+            cam.stop()
+        except Exception:
+            pass
+        try:
+            cam.close()
+        except Exception:
+            pass
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
+PYEOF
+
+    chmod +x "${INFERENCE_SCRIPT}"
+    info "Inference script → ${INFERENCE_SCRIPT}"
+
+    # ── Create web gallery script (Python stdlib only) ──
+    cat > "${GALLERY_SCRIPT}" << 'PYEOF'
+#!/usr/bin/env python3
+"""Web gallery for Team 2 — live camera view + dedup-aware FIFO gallery.
+
+Serves on http://<pi-ip>:5000.
+
+Endpoints:
+  /                     Main page: live view + last 10 detections (5s refresh)
+  /gallery              Latest 1000 detection images (10s refresh)
+  /gallery?view=oldest  Oldest 1000 detection images (10s refresh)
+  /latest               Most recent camera frame (annotated, no-cache)
+  /image/{name}         Full-size detection image
+  /download/{name}      Detection image with Content-Disposition (save dialog)
+"""
+import os
+import re
+import json
+import html
+import base64
+import socket
+import subprocess
+from pathlib import Path
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse, parse_qs
+
+HOME = os.path.expanduser("~")
+DATA_DIR = os.path.join(HOME, "ultralytics-local", "results")
+LATEST_FILE = os.path.join(DATA_DIR, "latest.jpg")
+JSONL_FILE = os.path.join(DATA_DIR, "detections.jsonl")
+PORT = 5000
+MAX_GALLERY = 1000
+
+# ── Detect Pi's IP address ──────────────────────────────────────────────────
+def get_ip():
+    for method in (
+        lambda: subprocess.check_output(["hostname", "-I"], text=True).split()[0],
+        lambda: socket.gethostbyname(socket.gethostname()),
+    ):
+        try:
+            ip = method()
+            if ip and not ip.startswith("127."):
+                return ip
+        except Exception:
+            pass
+    return "<pi-ip>"
+
+PI_IP = get_ip()
+
+# ── Load dedup count info from JSONL ────────────────────────────────────────
+def load_counts():
+    """Return dict mapping frame_file -> (count, last_seen)."""
+    counts = {}
+    if not os.path.isfile(JSONL_FILE):
+        return counts
+    try:
+        with open(JSONL_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ff = entry.get("frame_file", "")
+                if ff:
+                    counts[ff] = (entry.get("count", 1), entry.get("last_seen", ""))
+    except Exception:
+        pass
+    return counts
+
+# ── Config file (shared with inference) ────────────────────────────────────
+CONFIG_FILE = os.path.join(DATA_DIR, "config.json")
+
+def load_gallery_config():
+    """Return dict with capture_interval, max_fifo, min_free_space_gb, camera_resolution."""
+    cfg = {"capture_interval": 5, "auto_refresh": 10, "max_fifo": 1000,
+           "min_free_space_gb": 1, "camera_resolution": "1920x1080"}
+    if os.path.isfile(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE) as f:
+                cfg.update(json.load(f))
+        except Exception:
+            pass
+    return cfg
+
+def save_gallery_config(cfg):
+    """Write config.json (atomic write via tmp + rename)."""
+    tmp = CONFIG_FILE + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=2)
+        os.rename(tmp, CONFIG_FILE)
+        return True
+    except Exception:
+        try:
+            if os.path.isfile(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+        return False
+
+# ── Load JSONL into per-file class index ──────────────────────────────────
+def load_class_index():
+    """Return dict mapping frame_file -> list of target class names.
+    Handles both new format ({"targets": ["cat","person"]}) and
+    old format ({"class": "motorcycle,car"}).
+    """
+    idx = {}
+    if not os.path.isfile(JSONL_FILE):
+        return idx
+    try:
+        with open(JSONL_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ff = entry.get("frame_file", "")
+                if not ff:
+                    continue
+                # New format: "targets" is a list
+                targets = entry.get("targets")
+                if targets and isinstance(targets, list):
+                    idx[ff] = targets
+                    continue
+                # Old format: "class" is a string (possibly comma-separated)
+                cls = entry.get("class")
+                if cls and isinstance(cls, str):
+                    idx[ff] = [c.strip() for c in cls.split(",")]
+    except Exception:
+        pass
+    return idx
+
+# ── HTML templates ──────────────────────────────────────────────────────────
+INDEX_HTML = """<!DOCTYPE html>
+<html>
+<head>
+  <title>YOLO Camera \u2014 Pi 4</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>var REFRESH_URL='%(refresh_url)s';var REFRESH_MS=%(refresh_ms)s;</script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, monospace; background: #0d0d0d; color: #eee; padding: 16px; }
+    a { color: #4caf50; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .header h1 { color: #4caf50; font-size: 20px; }
+    .header-controls { display: flex; align-items: center; gap: 10px; }
+    .share { font-size: 13px; color: #888; background: #1a1a1a; padding: 6px 12px; border-radius: 6px; }
+    .share code { color: #ccc; }
+    .filter-form { display: inline; }
+    .filter-select {
+      background: #1a1a1a; color: #eee; border: 1px solid #2a2a2a;
+      padding: 4px 8px; border-radius: 4px; font-size: 13px; cursor: pointer;
+    }
+    .gear-btn {
+      background: none; border: none; color: #555; font-size: 20px;
+      cursor: pointer; padding: 2px 6px; border-radius: 4px;
+    }
+    .gear-btn:hover { color: #4caf50; background: #1a1a1a; }
+
+    .live-section { margin-bottom: 20px; }
+    .live-section h2 { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+    .live-frame {
+      background: #000; border-radius: 8px; overflow: hidden; max-width: 640px;
+      border: 1px solid #2a2a2a;
+    }
+    .live-frame img { display: block; width: 100%%; height: auto; }
+    .live-ts { font-size: 12px; color: #555; margin-top: 4px; }
+
+    .detections-section { margin-bottom: 16px; }
+    .detections-section h2 { font-size: 14px; color: #888; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+    .detection-grid {
+      display: grid; grid-template-columns: repeat(10, 1fr);
+      gap: 10px;
+    }
+    .card {
+      background: #1a1a1a; border-radius: 8px; overflow: hidden;
+      border: 1px solid #2a2a2a;
+      transition: border-color 0.2s, transform 0.2s;
+      position: relative;
+    }
+    .card:hover { border-color: #4caf50; transform: scale(1.02); }
+    .card img { display: block; width: 100%%; height: 120px; object-fit: contain; cursor: pointer; }
+    .card-body { padding: 6px 8px 8px; }
+    .card-body .name { font-size: 11px; color: #aaa; word-break: break-all; }
+    .card-body .actions { margin-top: 4px; display: flex; gap: 8px; font-size: 12px; }
+    .count-badge {
+      position: absolute; top: 4px; right: 4px;
+      background: rgba(0,0,0,0.75); color: #4caf50;
+      font-size: 11px; font-weight: bold; padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .footer { font-size: 12px; color: #444; margin-top: 20px; }
+    .nav { margin-bottom: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .nav a { font-size: 13px; }
+
+    .lightbox {
+      display: none; position: fixed; top: 0; left: 0;
+      width: 100%%; height: 100%%; background: rgba(0,0,0,0.85);
+      z-index: 1000; justify-content: center; align-items: center;
+      cursor: pointer;
+    }
+    .lightbox.active { display: flex; }
+    .lightbox img { max-width: 90%%; max-height: 90%%; border-radius: 4px; cursor: default; }
+
+    /* Settings Modal */
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0;
+      width: 100%%; height: 100%%; background: rgba(0,0,0,0.7);
+      z-index: 2000; justify-content: center; align-items: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px;
+      padding: 24px; max-width: 400px; width: 90%%; color: #eee;
+    }
+    .modal h2 { color: #4caf50; font-size: 18px; margin-bottom: 16px; }
+    .modal label { display: block; font-size: 13px; color: #888; margin: 10px 0 4px; }
+    .modal input, .modal select {
+      width: 100%%; background: #0d0d0d; border: 1px solid #2a2a2a;
+      color: #eee; padding: 8px 10px; border-radius: 4px; font-size: 14px;
+    }
+    .modal .row { display: flex; gap: 12px; }
+    .modal .row > div { flex: 1; }
+    .modal .btn-row { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+    .modal .btn-row button {
+      padding: 8px 20px; border: none; border-radius: 4px; font-size: 14px; cursor: pointer;
+    }
+    .modal .btn-save { background: #4caf50; color: #000; }
+    .modal .btn-save:hover { background: #5dbf60; }
+    .modal .btn-cancel { background: #2a2a2a; color: #aaa; }
+    .modal .btn-cancel:hover { background: #3a3a3a; }
+    .modal .disk-info { font-size: 12px; color: #555; margin-top: 12px; }
+    .modal .disk-info span { color: #aaa; }
+    .modal .files-info { font-size: 12px; color: #555; margin-top: 4px; }
+    .modal .files-info span { color: #aaa; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>\U0001F5B9 YOLO Camera</h1>
+    <div class="header-controls">
+      %(filter)s
+      <button class="gear-btn" id="gearBtn" title="Settings">\u2699</button>
+      <div class="share"><code>http://%(ip)s:%(port)d</code></div>
+    </div>
+  </div>
+
+  <div class="live-section">
+    <h2>\U0001F534 Live View</h2>
+    <div class="live-frame">
+      <img src="/latest?t=%(ts)d" alt="Live camera feed" width="640" height="480">
+    </div>
+    <div class="live-ts">Last updated: %(time)s \u00b7 auto-refresh every %(refresh_label)s</div>
+  </div>
+
+  <div class="nav">
+    <a href="/gallery%(class_qs)s">&rarr; Latest %(max)d</a>
+    <a href="/gallery?view=oldest%(class_qs_amp)s">&rarr; Oldest %(max)d</a>
+  </div>
+
+  <div class="detections-section">
+    <h2>\U0001F4F7 Last 10 Detections</h2>
+    %(cards)s
+  </div>
+
+  <div class="footer">Ultralytics YOLO on Raspberry Pi 4 \u00b7 Running on %(ip)s:%(port)d</div>
+
+  <div id="lightbox" class="lightbox">
+    <span id="lbCloseLb" style="position:absolute;top:16px;right:20px;font-size:24px;color:#4caf50;cursor:pointer;user-select:none;z-index:1;background:rgba(0,0,0,0.5);padding:4px 10px;border-radius:4px;">\u2716 Close</span>
+    <span id="lbLive" style="position:absolute;top:16px;left:20px;font-size:16px;color:#4caf50;cursor:pointer;user-select:none;z-index:1;background:rgba(0,0,0,0.5);padding:4px 10px;border-radius:4px;"><a href="/" style="color:#4caf50;text-decoration:none;">&larr; Live View</a></span>
+    <span id="lbPrev" style="position:absolute;left:20px;top:50%%;transform:translateY(-50%%);font-size:48px;color:#4caf50;cursor:pointer;user-select:none;z-index:1;">&#9664;</span>
+    <img id="lightbox-img" src="">
+    <span id="lbNext" style="position:absolute;right:20px;top:50%%;transform:translateY(-50%%);font-size:48px;color:#4caf50;cursor:pointer;user-select:none;z-index:1;">&#9654;</span>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal-overlay">
+    <div class="modal">
+      <h2>\u2699 Settings</h2>
+      <label>Capture Interval (seconds)</label>
+      <select id="cfg_interval">
+        <option value="1">1s</option>
+        <option value="5" selected>5s</option>
+        <option value="10">10s</option>
+        <option value="30">30s</option>
+        <option value="60">60s</option>
+        <option value="300">5min</option>
+      </select>
+      <div class="row">
+        <div>
+          <label>Max Files</label>
+          <input id="cfg_maxfifo" type="number" min="10" max="1000000" value="1000">
+        </div>
+        <div>
+          <label>Min Free Space (GB)</label>
+          <input id="cfg_minfree" type="number" min="0" max="100" step="0.1" value="1">
+        </div>
+      </div>
+      <label>Camera Resolution</label>
+      <select id="cfg_resolution">
+        <option value="1920x1080">1920x1080 (Full HD)</option>
+        <option value="3280x2464">3280x2464 (8MP Max)</option>
+      </select>
+      <label>Auto-Refresh Interval</label>
+      <select id="cfg_auto_refresh">
+        <option value="1">1s</option>
+        <option value="5">5s</option>
+        <option value="10" selected>10s</option>
+        <option value="30">30s</option>
+        <option value="60">60s</option>
+        <option value="300">5min</option>
+      </select>
+      <div class="files-info">Files saved: <span id="cfg_filecount">-</span></div>
+      <div class="disk-info">Disk: <span id="cfg_diskinfo">-</span></div>
+      <div class="btn-row">
+        <button class="btn-cancel" id="settingsCancel">Cancel</button>
+        <button class="btn-save" id="settingsSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    var modal = document.getElementById('settingsModal');
+    var btnGear = document.getElementById('gearBtn');
+    var btnCancel = document.getElementById('settingsCancel');
+    var btnSave = document.getElementById('settingsSave');
+    var lb = document.getElementById('lightbox');
+    var lbi = document.getElementById('lightbox-img');
+
+    var refreshTimer = setTimeout(function(){ location.href = REFRESH_URL; }, REFRESH_MS);
+
+    function resetRefreshTimer() {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(function(){ location.href = REFRESH_URL; }, REFRESH_MS);
+    }
+
+    btnGear.addEventListener('click', function(){
+      clearTimeout(refreshTimer);
+      modal.classList.add('active');
+      fetch('/config').then(function(r){return r.json()}).then(function(cfg){
+        document.getElementById('cfg_interval').value = cfg.capture_interval || 5;
+        document.getElementById('cfg_maxfifo').value = cfg.max_fifo || 1000;
+        document.getElementById('cfg_minfree').value = cfg.min_free_space_gb || 1;
+        document.getElementById('cfg_resolution').value = cfg.camera_resolution || '1920x1080';
+        document.getElementById('cfg_auto_refresh').value = cfg.auto_refresh || 10;
+        if (cfg._file_count !== undefined) {
+          document.getElementById('cfg_filecount').textContent = cfg._file_count;
+        }
+        if (cfg._disk) {
+          var d = cfg._disk;
+          document.getElementById('cfg_diskinfo').textContent =
+            d.used_gb + 'G used / ' + d.free_gb + 'G free / ' + d.total_gb + 'G total';
+        }
+      }).catch(function(){
+        document.getElementById('cfg_diskinfo').textContent = '(error loading config)';
+      });
+    });
+
+    function closeSettings() {
+      modal.classList.remove('active');
+      resetRefreshTimer();
+    }
+    btnCancel.addEventListener('click', closeSettings);
+
+    btnSave.addEventListener('click', function(){
+      var body = JSON.stringify({
+        capture_interval: parseInt(document.getElementById('cfg_interval').value, 10),
+        max_fifo: parseInt(document.getElementById('cfg_maxfifo').value, 10),
+        min_free_space_gb: parseFloat(document.getElementById('cfg_minfree').value),
+        camera_resolution: document.getElementById('cfg_resolution').value,
+        auto_refresh: parseInt(document.getElementById('cfg_auto_refresh').value, 10),
+      });
+      clearTimeout(refreshTimer);
+      fetch('/config', {method:'POST', body:body}).then(function(r){
+        if (r.ok) {
+          closeSettings();
+          location.reload();
+        } else {
+          alert('Failed to save settings');
+          resetRefreshTimer();
+        }
+      }).catch(function(){
+        alert('Network error saving settings');
+        resetRefreshTimer();
+      });
+    });
+
+    // Lightbox with prev/next navigation
+    var lbImgs = [];
+    var lbIdx = -1;
+    function lbClose() {
+      lb.classList.remove('active');
+      resetRefreshTimer();
+    }
+    function lbNav(d) {
+      var n = lbImgs.length;
+      if (!n) return;
+      lbIdx = lbIdx + d;
+      if (lbIdx < 0) lbIdx = n - 1;
+      if (lbIdx >= n) lbIdx = 0;
+      lbi.src = lbImgs[lbIdx];
+    }
+    document.addEventListener('click', function(e){
+      var t = e.target;
+      if (t.tagName === 'IMG' && t.closest('.card')) {
+        lbImgs = [].map.call(document.querySelectorAll('.card img[src^="/thumb/"]'), function(img){ return img.src; });
+        lbIdx = lbImgs.indexOf(t.src);
+        if (lbIdx < 0) lbIdx = 0;
+        lbi.src = t.src;
+        lb.classList.add('active');
+        clearTimeout(refreshTimer);
+      }
+    });
+    lb.addEventListener('click', function(e){
+      if (e.target === lb) lbClose();
+    });
+    document.getElementById('lbCloseLb').addEventListener('click', lbClose);
+    document.getElementById('lbPrev').addEventListener('click', function(){ lbNav(-1); });
+    document.getElementById('lbNext').addEventListener('click', function(){ lbNav(1); });
+    document.addEventListener('keydown', function(e){
+      if (lb.classList.contains('active')) {
+        if (e.key === 'Escape') lbClose();
+        if (e.key === 'ArrowLeft') lbNav(-1);
+        if (e.key === 'ArrowRight') lbNav(1);
+      }
+    });
+    // Close modal on overlay click
+    modal.addEventListener('click', function(e){
+      if (e.target === this) closeSettings();
+    });
+  })();
+  </script>
+</body>
+</html>"""
+
+GALLERY_HTML = """<!DOCTYPE html>
+<html>
+<head>
+  <title>%(title)s \u2014 Pi 4</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <script>var REFRESH_URL='%(refresh_url)s';var REFRESH_MS=%(refresh_ms)s;</script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', system-ui, monospace; background: #0d0d0d; color: #eee; padding: 16px; }
+    a { color: #4caf50; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+    .header h1 { color: #4caf50; font-size: 20px; }
+    .header-controls { display: flex; align-items: center; gap: 10px; }
+    .stats { font-size: 13px; color: #888; }
+    .nav { margin-bottom: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .nav a { font-size: 13px; }
+    .filter-form { display: inline; }
+    .filter-select {
+      background: #1a1a1a; color: #eee; border: 1px solid #2a2a2a;
+      padding: 4px 8px; border-radius: 4px; font-size: 13px; cursor: pointer;
+    }
+    .gear-btn {
+      background: none; border: none; color: #555; font-size: 20px;
+      cursor: pointer; padding: 2px 6px; border-radius: 4px;
+    }
+    .gear-btn:hover { color: #4caf50; background: #1a1a1a; }
+
+    .detection-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .card {
+      background: #1a1a1a; border-radius: 8px; overflow: hidden;
+      border: 1px solid #2a2a2a;
+      transition: border-color 0.2s, transform 0.2s;
+      position: relative;
+    }
+    .card:hover { border-color: #4caf50; transform: scale(1.02); }
+    .card img { display: block; width: 100%%; height: 200px; object-fit: contain; cursor: pointer; }
+    .card-body { padding: 6px 8px 8px; }
+    .card-body .name { font-size: 11px; color: #aaa; word-break: break-all; }
+    .card-body .actions { margin-top: 4px; display: flex; gap: 8px; font-size: 12px; }
+    .count-badge {
+      position: absolute; top: 4px; right: 4px;
+      background: rgba(0,0,0,0.75); color: #4caf50;
+      font-size: 11px; font-weight: bold; padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .footer { font-size: 12px; color: #444; margin-top: 20px; }
+
+    .lightbox {
+      display: none; position: fixed; top: 0; left: 0;
+      width: 100%%; height: 100%%; background: rgba(0,0,0,0.85);
+      z-index: 1000; justify-content: center; align-items: center;
+      cursor: pointer;
+    }
+    .lightbox.active { display: flex; }
+    .lightbox img { max-width: 90%%; max-height: 90%%; border-radius: 4px; cursor: default; }
+
+    /* Settings Modal */
+    .modal-overlay {
+      display: none; position: fixed; top: 0; left: 0;
+      width: 100%%; height: 100%%; background: rgba(0,0,0,0.7);
+      z-index: 2000; justify-content: center; align-items: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal {
+      background: #1a1a1a; border: 1px solid #2a2a2a; border-radius: 10px;
+      padding: 24px; max-width: 400px; width: 90%%; color: #eee;
+    }
+    .modal h2 { color: #4caf50; font-size: 18px; margin-bottom: 16px; }
+    .modal label { display: block; font-size: 13px; color: #888; margin: 10px 0 4px; }
+    .modal input, .modal select {
+      width: 100%%; background: #0d0d0d; border: 1px solid #2a2a2a;
+      color: #eee; padding: 8px 10px; border-radius: 4px; font-size: 14px;
+    }
+    .modal .row { display: flex; gap: 12px; }
+    .modal .row > div { flex: 1; }
+    .modal .btn-row { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+    .modal .btn-row button {
+      padding: 8px 20px; border: none; border-radius: 4px; font-size: 14px; cursor: pointer;
+    }
+    .modal .btn-save { background: #4caf50; color: #000; }
+    .modal .btn-save:hover { background: #5dbf60; }
+    .modal .btn-cancel { background: #2a2a2a; color: #aaa; }
+    .modal .btn-cancel:hover { background: #3a3a3a; }
+    .modal .disk-info { font-size: 12px; color: #555; margin-top: 12px; }
+    .modal .disk-info span { color: #aaa; }
+    .modal .files-info { font-size: 12px; color: #555; margin-top: 4px; }
+    .modal .files-info span { color: #aaa; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1><a href="/" style="color:#4caf50;text-decoration:none;">\U0001F4F7 %(title)s</a></h1>
+    <div class="header-controls">
+      %(filter)s
+      <button class="gear-btn" id="gearBtn" title="Settings">\u2699</button>
+      <div class="stats">%(stats)s \u00b7 auto-refresh every %(refresh_label)s</div>
+    </div>
+  </div>
+  <div class="nav">
+    %(nav)s
+  </div>
+  %(cards)s
+  <div class="footer">Ultralytics YOLO on Raspberry Pi 4</div>
+
+  <div id="lightbox" class="lightbox">
+    <span id="lbCloseLb" style="position:absolute;top:16px;right:20px;font-size:24px;color:#4caf50;cursor:pointer;user-select:none;z-index:1;background:rgba(0,0,0,0.5);padding:4px 10px;border-radius:4px;">\u2716 Close</span>
+    <span id="lbLive" style="position:absolute;top:16px;left:20px;font-size:16px;color:#4caf50;cursor:pointer;user-select:none;z-index:1;background:rgba(0,0,0,0.5);padding:4px 10px;border-radius:4px;"><a href="/" style="color:#4caf50;text-decoration:none;">&larr; Live View</a></span>
+    <span id="lbPrev" style="position:absolute;left:20px;top:50%%;transform:translateY(-50%%);font-size:48px;color:#4caf50;cursor:pointer;user-select:none;z-index:1;">&#9664;</span>
+    <img id="lightbox-img" src="">
+    <span id="lbNext" style="position:absolute;right:20px;top:50%%;transform:translateY(-50%%);font-size:48px;color:#4caf50;cursor:pointer;user-select:none;z-index:1;">&#9654;</span>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settingsModal" class="modal-overlay">
+    <div class="modal">
+      <h2>\u2699 Settings</h2>
+      <label>Capture Interval (seconds)</label>
+      <select id="cfg_interval">
+        <option value="1">1s</option>
+        <option value="5" selected>5s</option>
+        <option value="10">10s</option>
+        <option value="30">30s</option>
+        <option value="60">60s</option>
+        <option value="300">5min</option>
+      </select>
+      <div class="row">
+        <div>
+          <label>Max Files</label>
+          <input id="cfg_maxfifo" type="number" min="10" max="1000000" value="1000">
+        </div>
+        <div>
+          <label>Min Free Space (GB)</label>
+          <input id="cfg_minfree" type="number" min="0" max="100" step="0.1" value="1">
+        </div>
+      </div>
+      <label>Camera Resolution</label>
+      <select id="cfg_resolution">
+        <option value="1920x1080">1920×1080 (Full HD)</option>
+        <option value="3280x2464">3280×2464 (8MP Max)</option>
+      </select>
+      <label>Auto-Refresh Interval</label>
+      <select id="cfg_auto_refresh">
+        <option value="1">1s</option>
+        <option value="5">5s</option>
+        <option value="10" selected>10s</option>
+        <option value="30">30s</option>
+        <option value="60">60s</option>
+        <option value="300">5min</option>
+      </select>
+      <div class="files-info">Files saved: <span id="cfg_filecount">-</span></div>
+      <div class="disk-info">Disk: <span id="cfg_diskinfo">-</span></div>
+      <div class="btn-row">
+        <button class="btn-cancel" id="settingsCancel">Cancel</button>
+        <button class="btn-save" id="settingsSave">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function(){
+    var modal = document.getElementById('settingsModal');
+    var btnGear = document.getElementById('gearBtn');
+    var btnCancel = document.getElementById('settingsCancel');
+    var btnSave = document.getElementById('settingsSave');
+    var lb = document.getElementById('lightbox');
+    var lbi = document.getElementById('lightbox-img');
+
+    var refreshTimer = setTimeout(function(){ location.href = REFRESH_URL; }, REFRESH_MS);
+
+    function resetRefreshTimer() {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(function(){ location.href = REFRESH_URL; }, REFRESH_MS);
+    }
+
+    btnGear.addEventListener('click', function(){
+      clearTimeout(refreshTimer);
+      modal.classList.add('active');
+      fetch('/config').then(function(r){return r.json()}).then(function(cfg){
+        document.getElementById('cfg_interval').value = cfg.capture_interval || 5;
+        document.getElementById('cfg_maxfifo').value = cfg.max_fifo || 1000;
+        document.getElementById('cfg_minfree').value = cfg.min_free_space_gb || 1;
+        document.getElementById('cfg_resolution').value = cfg.camera_resolution || '1920x1080';
+        document.getElementById('cfg_auto_refresh').value = cfg.auto_refresh || 10;
+        if (cfg._file_count !== undefined) {
+          document.getElementById('cfg_filecount').textContent = cfg._file_count;
+        }
+        if (cfg._disk) {
+          var d = cfg._disk;
+          document.getElementById('cfg_diskinfo').textContent =
+            d.used_gb + 'G used / ' + d.free_gb + 'G free / ' + d.total_gb + 'G total';
+        }
+      }).catch(function(){
+        document.getElementById('cfg_diskinfo').textContent = '(error loading config)';
+      });
+    });
+
+    function closeSettings() {
+      modal.classList.remove('active');
+      resetRefreshTimer();
+    }
+    btnCancel.addEventListener('click', closeSettings);
+
+    btnSave.addEventListener('click', function(){
+      var body = JSON.stringify({
+        capture_interval: parseInt(document.getElementById('cfg_interval').value, 10),
+        max_fifo: parseInt(document.getElementById('cfg_maxfifo').value, 10),
+        min_free_space_gb: parseFloat(document.getElementById('cfg_minfree').value),
+        camera_resolution: document.getElementById('cfg_resolution').value,
+        auto_refresh: parseInt(document.getElementById('cfg_auto_refresh').value, 10),
+      });
+      clearTimeout(refreshTimer);
+      fetch('/config', {method:'POST', body:body}).then(function(r){
+        if (r.ok) {
+          closeSettings();
+          location.reload();
+        } else {
+          alert('Failed to save settings');
+          resetRefreshTimer();
+        }
+      }).catch(function(){
+        alert('Network error saving settings');
+        resetRefreshTimer();
+      });
+    });
+
+    // Lightbox with prev/next navigation
+    var lbImgs = [];
+    var lbIdx = -1;
+    function lbClose() {
+      lb.classList.remove('active');
+      resetRefreshTimer();
+    }
+    function lbNav(d) {
+      var n = lbImgs.length;
+      if (!n) return;
+      lbIdx = lbIdx + d;
+      if (lbIdx < 0) lbIdx = n - 1;
+      if (lbIdx >= n) lbIdx = 0;
+      lbi.src = lbImgs[lbIdx];
+    }
+    document.addEventListener('click', function(e){
+      var t = e.target;
+      if (t.tagName === 'IMG' && t.closest('.card')) {
+        lbImgs = [].map.call(document.querySelectorAll('.card img[src^="/thumb/"]'), function(img){ return img.src; });
+        lbIdx = lbImgs.indexOf(t.src);
+        if (lbIdx < 0) lbIdx = 0;
+        lbi.src = t.src;
+        lb.classList.add('active');
+        clearTimeout(refreshTimer);
+      }
+    });
+    lb.addEventListener('click', function(e){
+      if (e.target === lb) lbClose();
+    });
+    document.getElementById('lbCloseLb').addEventListener('click', lbClose);
+    document.getElementById('lbPrev').addEventListener('click', function(){ lbNav(-1); });
+    document.getElementById('lbNext').addEventListener('click', function(){ lbNav(1); });
+    document.addEventListener('keydown', function(e){
+      if (lb.classList.contains('active')) {
+        if (e.key === 'Escape') lbClose();
+        if (e.key === 'ArrowLeft') lbNav(-1);
+        if (e.key === 'ArrowRight') lbNav(1);
+      }
+    });
+    // Close modal on overlay click
+    modal.addEventListener('click', function(e){
+      if (e.target === this) closeSettings();
+    });
+  })();
+  </script>
+</body>
+</html>"""
+
+
+def _sec_label(s):
+    """Format seconds as human label, e.g. 300 → '5min', 10 → '10s'."""
+    return "%dmin" % (s // 60) if s >= 60 else "%ds" % s
+
+
+def _class_filter_options(selected, action="/"):
+    """Build <form> + <select> for class filter (native GET submission)."""
+    options = [
+        ("", "All"),
+        ("person", "Person"),
+        ("cat", "Cat"),
+        ("bird", "Bird"),
+    ]
+    sel = 'selected'
+    opts = ''.join(
+        '<option value="%s" %s>%s</option>' % (v, sel if v == selected else "", l)
+        for v, l in options
+    )
+    return ('<form method="GET" action="%s" class="filter-form">'
+            '<select class="filter-select" name="class" onchange="this.form.submit()">'
+            '%s</select></form>') % (action, opts)
+
+
+class GalleryHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        params = parse_qs(parsed.query)
+
+        if path == "/":
+            class_filter = params.get("class", [""])[0]
+            self.send_index(class_filter=class_filter)
+        elif path == "/gallery":
+            oldest = params.get("view", [None])[0] == "oldest"
+            class_filter = params.get("class", [""])[0]
+            self.send_gallery(oldest=oldest, class_filter=class_filter)
+        elif path == "/latest":
+            self.send_latest()
+        elif path == "/config":
+            self.send_config()
+        elif path.startswith("/download/"):
+            name = path.split("/download/", 1)[1]
+            self.send_download(name)
+        elif path.startswith("/thumb/"):
+            name = path.split("/thumb/", 1)[1]
+            self.send_thumbnail(name)
+        elif path.startswith("/image/"):
+            name = path.split("/image/", 1)[1]
+            self.send_image(name)
+        else:
+            self.send_error(404, "Not Found")
+
+    def do_POST(self):
+        parsed = urlparse(self.path)
+        path = parsed.path.rstrip("/") or "/"
+        if path == "/config":
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = self.rfile.read(length).decode()
+                cfg = json.loads(body)
+                ok = save_gallery_config(cfg)
+                if ok:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b'{"ok": true}')
+                else:
+                    self.send_error(500, "Failed to write config")
+            except Exception as e:
+                self.send_error(400, f"Bad request: {e}")
+        else:
+            self.send_error(404, "Not Found")
+
+    def send_config(self):
+        cfg = load_gallery_config()
+        # Add disk usage info
+        try:
+            st = os.statvfs(DATA_DIR)
+            free_gb = st.f_frsize * st.f_bavail / (1024 ** 3)
+            total_gb = st.f_frsize * st.f_blocks / (1024 ** 3)
+            used_gb = total_gb - free_gb
+        except Exception:
+            free_gb = used_gb = total_gb = 0
+        cfg["_disk"] = {
+            "free_gb": round(free_gb, 1),
+            "used_gb": round(used_gb, 1),
+            "total_gb": round(total_gb, 1),
+        }
+        # Count current files
+        n = len(list(Path(DATA_DIR).glob("detect_*.jpg")))
+        cfg["_file_count"] = n
+        resp = json.dumps(cfg).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(resp)))
+        self.end_headers()
+        self.wfile.write(resp)
+
+    def send_index(self, class_filter=""):
+        try:
+            counts = load_counts()
+            cards = self._detection_cards(limit=10, counts=counts,
+                                          class_filter=class_filter)
+            now = int(time.time())
+            time_str = time.strftime("%Y-%m-%d %H:%M:%S")
+            cfg = load_gallery_config()
+            max_f = cfg.get("max_fifo", MAX_GALLERY)
+            filter_html = _class_filter_options(class_filter, "/")
+            class_qs = ("?class=" + class_filter) if class_filter else ""
+            class_qs_amp = ("&class=" + class_filter) if class_filter else ""
+            refresh_url = "/" + class_qs
+            refresh_s = cfg.get("auto_refresh", 10)
+            body = INDEX_HTML % {
+                "ip": PI_IP,
+                "port": PORT,
+                "ts": now,
+                "time": html.escape(time_str),
+                "cards": cards,
+                "max": max_f,
+                "filter": filter_html,
+                "class_qs": class_qs,
+                "class_qs_amp": class_qs_amp,
+                "refresh_url": html.escape(refresh_url),
+                "refresh_ms": refresh_s * 1000,
+                "refresh_label": _sec_label(refresh_s),
+            }
+            self._send_html(body)
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            self.send_error(503, f"Gallery data not ready: {e}")
+
+    def send_gallery(self, oldest=False, class_filter=""):
+        cfg = load_gallery_config()
+        max_f = cfg.get("max_fifo", MAX_GALLERY)
+        files = sorted(Path(DATA_DIR).glob("detect_*.jpg"), reverse=not oldest)
+        if class_filter:
+            files = self._filter_by_class(files, class_filter)
+        files = files[:max_f]
+        if oldest:
+            files = list(reversed(files))
+        n_total = len(list(Path(DATA_DIR).glob("detect_*.jpg")))
+        n_shown = len(files)
+        title = "Oldest %d" % max_f if oldest else "Latest %d" % max_f
+        stats = "%d image%s (FIFO, max %d)" % (
+            n_total, "s" if n_total != 1 else "", max_f)
+        counts = load_counts()
+        cards = self._detection_cards(files=files, counts=counts)
+        action = "/gallery?view=oldest" if oldest else "/gallery"
+        filter_html = _class_filter_options(class_filter, action)
+        qs_class_sep = "&" if class_filter else ""
+        nav = '<a href="/">&larr; Live View</a>'
+        if oldest:
+            qs_class = ("?class=" + class_filter) if class_filter else ""
+            nav += '  <a href="/gallery%s">&larr; Latest %d</a>' % (qs_class, max_f)
+        else:
+            qs_class = ("&class=" + class_filter) if class_filter else ""
+            nav += '  <a href="/gallery?view=oldest%s">Oldest %d &rarr;</a>' % (qs_class, max_f)
+        if oldest:
+            refresh_url = "/gallery?view=oldest" + qs_class
+        else:
+            refresh_url = "/gallery" + (("?class=" + class_filter) if class_filter else "")
+        refresh_s = cfg.get("auto_refresh", 10)
+        body = GALLERY_HTML % {
+            "title": html.escape(title),
+            "stats": html.escape(stats),
+            "nav": nav,
+            "cards": cards,
+            "filter": filter_html,
+            "refresh_url": html.escape(refresh_url),
+            "refresh_ms": refresh_s * 1000,
+            "refresh_label": _sec_label(refresh_s),
+        }
+        self._send_html(body)
+
+    @staticmethod
+    def _filter_by_class(files, class_name):
+        """Filter a list of file paths to only those containing class_name."""
+        class_name = class_name.strip().lower()
+        if not class_name or class_name == "all":
+            return files
+        idx = load_class_index()
+        if not idx:
+            return []
+        return [f for f in files if class_name in [t.lower() for t in idx.get(f.name, [])]]
+
+    def _detection_cards(self, files=None, limit=None, counts=None, class_filter=""):
+        if counts is None:
+            counts = {}
+        if files is None:
+            files = sorted(Path(DATA_DIR).glob("detect_*.jpg"), reverse=True)
+            if class_filter:
+                files = self._filter_by_class(files, class_filter)
+            if limit:
+                files = files[:limit]
+        cards = []
+        for f in files:
+            label = html.escape(f.stem.replace("detect_", ""))
+            name = html.escape(f.name)
+            cnt, last_seen = counts.get(f.name, (1, ""))
+            badge = ""
+            if cnt > 1:
+                badge = '<div class="count-badge">%s \u00d7%d</div>' % (
+                    html.escape(f.stem.replace("detect_", "")[:12]), cnt)
+            cards.append(
+                '<div class="card">'
+                + badge
+                + '<img src="/thumb/%s" loading="lazy">'
+                  % name
+                + '<div class="card-body">'
+                + '<div class="name">%s</div>' % label
+                + '<div class="actions">'
+                + '<a href="/image/%s">\U0001F50D View</a>' % name
+                + '<a href="/download/%s">\u2B07 Download</a>' % name
+                + "</div></div></div>"
+            )
+        if not cards:
+            return '<p style="color:#555;">No detections yet. Point the camera at something!</p>'
+        return '<div class="detection-grid">' + "\n".join(cards) + "</div>"
+
+    def send_latest(self):
+        if not os.path.isfile(LATEST_FILE):
+            self.send_error(404, "No latest frame yet")
+            return
+        with open(LATEST_FILE, "rb") as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_image(self, name):
+        name = os.path.basename(name)
+        path = os.path.join(DATA_DIR, name)
+        if not os.path.isfile(path):
+            self.send_error(404, "Not Found")
+            return
+        with open(path, "rb") as f:
+            data = f.read()
+        b64 = base64.b64encode(data).decode()
+
+        # Build prev/next navigation from sorted detection images
+        all_files = sorted(Path(DATA_DIR).glob("detect_*.jpg"), reverse=True)
+        prev_name = next_name = ""
+        idx = 0
+        total = len(all_files)
+        for i, f in enumerate(all_files):
+            if f.name == name:
+                idx = i + 1
+                if i > 0:
+                    prev_name = all_files[i - 1].name
+                if i < total - 1:
+                    next_name = all_files[i + 1].name
+                break
+
+        nav_prev = ('<a id="prevLink" href="/image/%s">&larr; Prev</a>'
+                    % html.escape(prev_name)) if prev_name else '<span style="color:#444;">&larr; Prev</span>'
+        nav_next = ('<a id="nextLink" href="/image/%s">Next &rarr;</a>'
+                    % html.escape(next_name)) if next_name else '<span style="color:#444;">Next &rarr;</span>'
+
+        body = """<!DOCTYPE html>
+<html>
+<head>
+  <title>%s</title>
+  <style>
+    body { background: #111; color: #eee; font-family: monospace; text-align: center; padding: 20px; margin: 0; }
+    .nav { padding: 12px 0; display: flex; justify-content: center; gap: 20px; }
+    .nav a { color: #4caf50; text-decoration: none; font-size: 16px; }
+    .nav a:hover { text-decoration: underline; }
+    .nav .pos { color: #555; font-size: 13px; }
+    img { max-width: 95vw; max-height: 85vh; border-radius: 4px; }
+  </style>
+  <script>
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { history.back(); }
+      if (e.key === 'ArrowLeft') { var l = document.getElementById('prevLink'); if (l) l.click(); }
+      if (e.key === 'ArrowRight') { var l = document.getElementById('nextLink'); if (l) l.click(); }
+    });
+  </script>
+</head>
+<body>
+  <div class="nav"><a href="/">&larr; Live View</a>  <a href="/gallery">&larr; Gallery</a>  %s  %s  <span class="pos">Image %d of %d</span></div>
+  <img src="data:image/jpeg;base64,%s" alt="%s">
+</body>
+</html>""" % (html.escape(name), nav_prev, nav_next, idx, total, b64, html.escape(name))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body.encode())
+
+    def send_download(self, name):
+        name = os.path.basename(name)
+        path = os.path.join(DATA_DIR, name)
+        if not os.path.isfile(path):
+            self.send_error(404, "Not Found")
+            return
+        with open(path, "rb") as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_thumbnail(self, name):
+        name = os.path.basename(name)
+        path = os.path.join(DATA_DIR, name)
+        if not os.path.isfile(path):
+            self.send_error(404, "Not Found")
+            return
+        with open(path, "rb") as f:
+            data = f.read()
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "max-age=3600")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _send_html(self, body):
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        self.end_headers()
+        self.wfile.write(body.encode())
+
+    def log_message(self, format, *args):
+        pass
+
+
+if __name__ == "__main__":
+    import time
+    os.makedirs(DATA_DIR, exist_ok=True)
+    server = HTTPServer(("0.0.0.0", PORT), GalleryHandler)
+    print("Gallery running at http://%s:%d" % (PI_IP, PORT))
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.server_close()
+PYEOF
+
+    chmod +x "${GALLERY_SCRIPT}"
+    info "Web gallery script \u2192 ${GALLERY_SCRIPT}"
+}
+
+# ── Create Systemd Service ─────────────────────────────────────────────────────
+create_systemd_service() {
+    echo ""
+    info "Creating systemd service..."
+
+    # Use $HOME so systemd resolves it to the user's home directory
+    sudo tee "/etc/systemd/system/${SERVICE_NAME}" > /dev/null << SVC
+[Unit]
+Description=Ultralytics YOLO Wildlife Detection (Pi 4 + Camera v2)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=${PI_USER}
+ExecStart=${VENV_DIR}/bin/python3 ${INFERENCE_SCRIPT}
+WorkingDirectory=${BASE_DIR}
+
+[Install]
+WantedBy=multi-user.target
+SVC
+
+    info "Service file → /etc/systemd/system/${SERVICE_NAME}"
+
+    sudo tee "/etc/systemd/system/${GALLERY_SERVICE_NAME}" > /dev/null << SVC
+[Unit]
+Description=Ultralytics YOLO Detection Gallery (Pi 4)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=${PI_USER}
+ExecStart=${VENV_DIR}/bin/python3 ${GALLERY_SCRIPT}
+WorkingDirectory=${BASE_DIR}
+
+[Install]
+WantedBy=multi-user.target
+SVC
+
+    info "Service file → /etc/systemd/system/${GALLERY_SERVICE_NAME}"
+}
+
+# ── Enable & Start Service ─────────────────────────────────────────────────────
+enable_service() {
+    echo ""
+    info "Enabling and starting systemd services..."
+    sudo systemctl daemon-reload
+    sudo systemctl enable "${SERVICE_NAME}"
+    sudo systemctl start "${SERVICE_NAME}"
+    sudo systemctl enable "${GALLERY_SERVICE_NAME}"
+    sudo systemctl start "${GALLERY_SERVICE_NAME}"
+    info "Services '${SERVICE_NAME}' and '${GALLERY_SERVICE_NAME}' enabled (auto-start on boot)"
+}
+
+# ── Update (fast path: scripts + services only) ─────────────────────────────────
+cmd_update() {
+    echo ""
+    info "Updating scripts and restarting services..."
+    create_inference_script
+    create_systemd_service
+    info "Restarting services to apply changes..."
+    sudo systemctl daemon-reload
+    sudo systemctl restart "${SERVICE_NAME}" "${GALLERY_SERVICE_NAME}" 2>/dev/null || true
+    info "Update complete!"
+    cmd_status
+}
+
+# ── Status ─────────────────────────────────────────────────────────────────────
+cmd_status() {
+    echo ""
+    echo "═══════════════════════ Deployment Status ═══════════════════════"
+    echo ""
+    echo "── Data Drive ──"
+    if mountpoint -q "${DATA_DRIVE_MOUNT}" 2>/dev/null; then
+        local sentinel_ok="no"
+        [ -f "${DATA_DRIVE_MOUNT}/${DATA_DRIVE_SENTINEL}" ] && sentinel_ok="yes"
+        local free_space
+        free_space=$(df -h "${DATA_DRIVE_MOUNT}" | awk 'NR==2 {print $4}')
+        echo "  Mount: ${DATA_DRIVE_MOUNT} ✓  Free: ${free_space}  Sentinel: ${sentinel_ok}"
+        echo "  Team 2 path: ${DATA_DRIVE_MOUNT}/team2"
+    else
+        if [ "${DATA_DRIVE:-false}" = "true" ]; then
+            echo "  ! DATA_DRIVE=true but ${DATA_DRIVE_MOUNT} is NOT mounted"
+            echo "  ! Run: ./setup-data-drive.sh sd"
+        else
+            echo "  Not configured (set DATA_DRIVE=true to use exFAT data partition)"
+        fi
+    fi
+    echo ""
+    echo "── Services ──"
+    sudo systemctl status "${SERVICE_NAME}" --no-pager 2>&1 | head -12
+    echo ""
+    sudo systemctl status "${GALLERY_SERVICE_NAME}" --no-pager 2>&1 | head -12
+    echo ""
+    echo "── Model ──"
+    if [ -d "${MODELS_DIR}/${MODEL_NAME}_ncnn_model" ]; then
+        echo "  Model: ${MODELS_DIR}/${MODEL_NAME}_ncnn_model ✓"
+    else
+        echo "  Model: not found (run ./team2 to export)"
+    fi
+    echo ""
+    echo "── Results ──"
+    if [ -d "${RESULTS_DIR}" ]; then
+        echo "  Directory: ${RESULTS_DIR}"
+        nframes=$(ls -1 "${RESULTS_DIR}"/detect_*.jpg 2>/dev/null | wc -l)
+        ndets=$(wc -l < "${RESULTS_DIR}/detections.jsonl" 2>/dev/null || echo "0")
+        # Sum dedup counts from JSONL for approximate real detection count
+        dedup_total=$(python3 -c "
+import json, sys
+f = '${RESULTS_DIR}/detections.jsonl'
+try:
+    with open(f) as fh:
+        print(sum(json.loads(l).get('count', 1) for l in fh if l.strip()))
+except Exception:
+    print(0)
+" 2>/dev/null || echo "?")
+        echo "  Saved frames: ${nframes}  (FIFO max 1000)"
+        echo "  JSONL entries: ${ndets}"
+        echo "  Dedup-adjusted detections: ${dedup_total}"
+        echo ""
+        echo "  Last 3 entries:"
+        if [ -f "${RESULTS_DIR}/detections.jsonl" ] && [ "$(wc -l < "${RESULTS_DIR}/detections.jsonl")" -gt 0 ]; then
+            tail -3 "${RESULTS_DIR}/detections.jsonl" | while IFS= read -r line; do
+                echo "    $(echo "$line" | python3 -m json.tool 2>/dev/null || echo "$line")"
+            done
+        else
+            echo "    (none yet)"
+        fi
+    else
+        echo "  Directory ${RESULTS_DIR} not found"
+    fi
+    echo ""
+    echo "── Live Feed ──"
+    latest_path="${RESULTS_DIR}/latest.jpg"
+    if [ -f "$latest_path" ]; then
+        now_epoch=$(date +%s)
+        file_mtime=$(stat -c %Y "$latest_path" 2>/dev/null || echo "0")
+        age=$((now_epoch - file_mtime))
+        if [ "$age" -lt 60 ]; then
+            echo "  latest.jpg: ${age}s old \u2713"
+        else
+            echo "  latest.jpg: ${age}s old \u26A0 (stale \u2014 inference may be down)"
+        fi
+    else
+        echo "  latest.jpg: not found (inference may not have processed a frame yet)"
+    fi
+    echo ""
+    echo "── Camera ──"
+    if command -v rpicam-hello &>/dev/null; then
+        echo "  rpicam-hello: available"
+    else
+        echo "  rpicam-hello: not installed"
+    fi
+    video_devs=$(ls /dev/video* 2>/dev/null || true)
+    echo "  Video devices: $([ -n "$video_devs" ] && echo "$(echo "$video_devs" | wc -w) found" || echo "none")"
+    echo ""
+    echo "════════════════════════════════════════════════════════════════"
+}
+
+# ── Logs ───────────────────────────────────────────────────────────────────────
+cmd_logs() {
+    sudo journalctl -fu "${SERVICE_NAME}"
+}
+
+# ── Stop / Start / Restart ──────────────────────────────────────────────────────
+cmd_stop() {
+    echo "Stopping services..."
+    sudo systemctl stop "${SERVICE_NAME}"
+    sudo systemctl stop "${GALLERY_SERVICE_NAME}"
+    echo "Services stopped"
+}
+
+cmd_start() {
+    echo "Starting services..."
+    sudo systemctl start "${SERVICE_NAME}"
+    sudo systemctl start "${GALLERY_SERVICE_NAME}"
+    echo "Services started"
+    sleep 2
+    cmd_status
+}
+
+cmd_restart() {
+    echo "Restarting services..."
+    sudo systemctl restart "${SERVICE_NAME}"
+    sudo systemctl restart "${GALLERY_SERVICE_NAME}"
+    echo "Services restarted"
+    sleep 2
+    cmd_status
+}
+
+# ── Snapshot (via rpicam-jpeg, works over SSH) ──
+cmd_snapshot() {
+    echo ""
+    info "Capturing a single test frame via rpicam-jpeg..."
+
+    if ! command -v rpicam-jpeg &>/dev/null; then
+        error "rpicam-jpeg not found. Install: sudo apt install rpicam-apps"
+        exit 1
+    fi
+
+    local output="${RESULTS_DIR}/snapshot.jpg"
+    mkdir -p "${RESULTS_DIR}"
+
+    # --nopreview works without display (important for SSH)
+    # --timeout 2000 = 2 seconds for auto-exposure to settle
+    if rpicam-jpeg --output "${output}" --timeout 2000 --width 640 --height 480 --nopreview 2>&1; then
+        if [ -f "${output}" ]; then
+            local size
+            size=$(du -h "${output}" | cut -f1)
+            info "Saved → ${output} (${size})"
+            # Also copy to /tmp for remote retrieval
+            cp "${output}" /tmp/team2_snapshot.jpg
+            info "Also available at /tmp/team2_snapshot.jpg (for scp)"
+        else
+            error "rpicam-jpeg finished but no output file found"
+            exit 1
+        fi
+    else
+        error "Snapshot failed. Check camera connection."
+        error "  Run: rpicam-hello --nopreview --timeout 2000  (to test camera)"
+        exit 1
+    fi
+}
+
+# ── Camera Test (via rpicam-hello, no display needed) ──
+cmd_camera_test() {
+    echo ""
+    info "Running camera test via rpicam-hello..."
+
+    if ! command -v rpicam-hello &>/dev/null; then
+        error "rpicam-hello not found. Install: sudo apt install rpicam-apps"
+        exit 1
+    fi
+
+    echo ""
+    echo "  Camera test: rpicam-hello --nopreview --timeout 2000"
+    echo "  (No preview window — tests camera hardware/driver only)"
+    echo ""
+
+    # --nopreview suppresses the display window, works over SSH
+    if rpicam-hello --nopreview --timeout 2000 2>&1; then
+        info "Camera test PASSED — sensor detected and operational"
+        echo ""
+        # Show sensor info
+        rpicam-hello --nopreview --timeout 500 --info-text \
+            "  Sensor: %sensor  |  Size: %width x %height  |  Gain: %rg / %bg" 2>&1 || true
+    else
+        error "Camera test FAILED"
+        error "  Check: sudo raspi-config → Interface Options → Camera → Enable"
+        error "  Check: rpicam-hello -t 2000  (on desktop with display)"
+        exit 1
+    fi
+}
+
+# ── Web Gallery ────────────────────────────────────────────────────────────────
+cmd_gallery() {
+    if systemctl is-active --quiet "${GALLERY_SERVICE_NAME}" 2>/dev/null; then
+        echo ""
+        info "Gallery service is already running (port 5000)"
+        info "Access it at http://<pi-ip>:5000 from any browser."
+        echo ""
+        echo "  To view logs:   sudo journalctl -fu ${GALLERY_SERVICE_NAME}"
+        echo "  To stop:        sudo systemctl stop ${GALLERY_SERVICE_NAME}"
+        echo "  To restart:     ./team2 restart"
+        return
+    fi
+    echo ""
+    echo "Starting web gallery on port 5000..."
+    echo "Access it at http://<pi-ip>:5000 from any browser."
+    echo "Press Ctrl+C to stop."
+    echo ""
+    python3 "${GALLERY_SCRIPT}"
+}
+
+# ── Wildlife Detection (Foreground Test) ────────────────────────────────────────
+cmd_wildlife() {
+    echo ""
+    echo "  Starting wildlife detection in foreground..."
+    echo "  Captures every ${CAPTURE_INTERVAL}s, targets: ${TARGET_CLASSES}"
+    echo "  (person=0, cat=15, bird=16)"
+    echo "  Saved to: ${RESULTS_DIR}"
+    echo "  Press Ctrl+C to stop."
+    echo ""
+    CAPTURE_INTERVAL="${CAPTURE_INTERVAL}" \
+    TARGET_CLASSES="${TARGET_CLASSES}" \
+    python3 "${INFERENCE_SCRIPT}"
+}
+
+# ── Main ───────────────────────────────────────────────────────────────────────
+usage() {
+    echo "Usage: $0 [command]"
+    echo ""
+    echo "Commands:"
+    echo "  (none)       Full setup (install deps, create venv, export model, enable)"
+    echo "  update       Fast: re-write scripts + restart services (run after editing this script)"
+    echo "  setup        Same as (none) — full setup"
+    echo "  setup --force  Full setup, redo all steps (re-install deps, re-export model)"
+    echo "  status       Show deployment status (inference + gallery)"
+    echo "  logs         Follow live inference logs (Ctrl+C to exit)"
+    echo "  wildlife     Run wildlife detection in foreground (for testing)"
+    echo "  gallery      Start web gallery for detection images (port 5000)"
+    echo "  snapshot     Capture a single test frame (via rpicam-jpeg)"
+    echo "  camera-test  Quick camera validation (via rpicam-hello)"
+    echo "  stop         Stop the service"
+    echo "  start        Start the service"
+    echo "  restart      Restart the service"
+    echo ""
+    echo "Environment:"
+    echo "  DATA_DRIVE=true    Use exFAT data partition (/mnt/wildlife-data/team2)"
+}
+
+FORCE=0
+case "${1:-setup}" in
+    setup)
+        shift 2>/dev/null || true
+        if [ "${1:-}" = "--force" ]; then
+            FORCE=1
+        fi
+        echo ""
+        echo "  ╔══════════════════════════════════════════════════╗"
+        echo "  ║  Ultralytics YOLO  —  Team 2  —  Local Setup   ║"
+        echo "  ║  Pi 4 + Camera v2  —  No Docker  —  Native     ║"
+        echo "  ║  DATA_DRIVE=${DATA_DRIVE:-false}                         ║"
+        echo "  ╚══════════════════════════════════════════════════╝"
+        echo ""
+        echo "  ┌──────────────────────────────────────────────────────┐"
+        echo "  │  Quick commands:                                     │"
+        echo "  │    $(printf "%-40s" "./team2 status       → deployment health") │"
+        echo "  │    $(printf "%-40s" "./team2 logs         → live inference output") │"
+        echo "  │    $(printf "%-40s" "./team2 snapshot     → capture test frame") │"
+        echo "  │    $(printf "%-40s" "./team2 camera-test  → validate camera") │"
+        echo "  │    $(printf "%-40s" "./team2 wildlife     → wildlife detection (foreground)") │"
+        echo "  │    $(printf "%-40s" "./team2 gallery      → web viewer (port 5000)") │"
+        echo "  │    $(printf "%-40s" "./team2 stop/start/restart → service mgmt") │"
+        echo "  │    $(printf "%-40s" "./team2 update       → fast re-write (after edits)") │"
+        echo "  │    $(printf "%-40s" "./team2 --help       → all commands") │"
+        echo "  │  *Gallery auto-starts on boot (ultralytics-gallery.service)  │"
+        echo "  └──────────────────────────────────────────────────────┘"
+        if [ "${FORCE}" = "1" ]; then
+            info "Force mode: clearing sentinels to redo all steps..."
+            rm -f "${SENTINEL_APT}"
+            rm -rf "${MODELS_DIR}/${MODEL_NAME}_ncnn_model" 2>/dev/null || true
+        fi
+        check_prereqs
+        setup_data_drive
+        setup_dirs
+        install_deps
+        if [ ! -d "${MODELS_DIR}/${MODEL_NAME}_ncnn_model" ]; then
+            export_model
+        else
+            info "NCNN model already exists at ${MODELS_DIR}/${MODEL_NAME}_ncnn_model"
+        fi
+        create_inference_script
+        create_systemd_service
+        enable_service
+        info "Setup complete!"
+        cmd_status
+        echo ""
+        echo "  Quick commands:"
+        echo "    $0 update       → fast re-write (after editing this script)"
+        echo "    $0 status       → deployment health"
+        echo "    $0 logs         → live inference output"
+        echo "    $0 snapshot     → capture test frame (rpicam-jpeg)"
+        echo "    $0 camera-test  → validate camera (rpicam-hello)"
+        echo "    $0 wildlife     → run wildlife detection (foreground test)"
+        echo "    $0 gallery      → browse detection images (http://<pi-ip>:5000)"
+        echo "  Web gallery auto-starts on boot (ultralytics-gallery.service)"
+        echo ""
+        ;;
+    update)
+        cmd_update
+        ;;
+    status)
+        cmd_status
+        ;;
+    logs)
+        cmd_logs
+        ;;
+    stop)
+        cmd_stop
+        ;;
+    start)
+        cmd_start
+        ;;
+    restart)
+        cmd_restart
+        ;;
+    snapshot)
+        cmd_snapshot
+        ;;
+    camera-test)
+        cmd_camera_test
+        ;;
+    gallery)
+        cmd_gallery
+        ;;
+    wildlife)
+        cmd_wildlife
+        ;;
+    --help|-h)
+        usage
+        ;;
+    *)
+        echo "Unknown command: $1"
+        usage
+        exit 1
+        ;;
+esac

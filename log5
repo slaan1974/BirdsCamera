@@ -1,0 +1,16 @@
+slaan1974@BirdsCamera:~ $ ./team1 status
+
+═══════════════════════ Deployment Status ═══════════════════════
+
+── Container ──
+ultralytics-pi-cam  Up 2 minutes  ultralytics/ultralytics:latest-arm64
+
+── Service ──
+● ultralytics-docker.service - Ultralytics YOLO Docker Inference (Pi 4 + Camera v2)
+     Loaded: loaded (/etc/systemd/system/ultralytics-docker.service; enabled; preset: enabled)
+     Active: activating (auto-restart) (Result: exit-code) since Mon 2026-06-22 15:53:41 CEST; 7s ago
+    Process: 14909 ExecStartPre=/usr/bin/docker start ultralytics-pi-cam (code=exited, status=0/SUCCESS)
+    Process: 14917 ExecStart=/usr/bin/docker exec ultralytics-pi-cam python3 /ultralytics/data/run_yolo.py (code=exited, status=1/FAILURE)
+   Main PID: 14917 (code=exited, status=1/FAILURE)
+        CPU: 140ms
+slaan1974@BirdsCamera:~ $ 

@@ -1,0 +1,832 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Ultralytics YOLO Team 1 — Docker Deployment with Camera v2 Auto-Start
+# Raspberry Pi 4 + Pi Camera v2
+# ==============================================================================
+# Usage:
+#   ./team1              Full setup (install, configure, enable)
+#   ./team1 status       Show deployment status
+#   ./team1 logs         Follow live inference logs
+#   ./team1 gallery      Start web gallery for viewing detection images
+#   ./team1 snapshot     Capture a single test frame (no YOLO)
+#   ./team1 stop         Stop the service
+#   ./team1 start        Start the service
+#   ./team1 restart      Restart the service
+#   ./team1 shell        Open a shell inside the container
+# ==============================================================================
+set -euo pipefail
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+USER="slaan1974"
+HOME_DIR="/home/${USER}"
+RESULTS_DIR="${HOME_DIR}/ultralytics/data"
+MODEL_NAME="yolo26n"
+CONTAINER_NAME="ultralytics-pi-cam"
+SERVICE_NAME="ultralytics-docker.service"
+IMAGE="ultralytics/ultralytics:latest-arm64"
+INFERENCE_SCRIPT="${RESULTS_DIR}/run_yolo.py"
+
+# DATA_DRIVE — redirect results to exFAT partition (set DATA_DRIVE=true in env)
+DATA_DRIVE_MOUNT="/mnt/wildlife-data"
+DATA_DRIVE_SENTINEL=".wildlife_data_sentinel"
+if [ "${DATA_DRIVE:-false}" = "true" ]; then
+    RESULTS_DIR="${DATA_DRIVE_MOUNT}/team1"
+    INFERENCE_SCRIPT="${RESULTS_DIR}/run_yolo.py"
+fi
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+info()  { echo -e "${GREEN}$(date '+%Y-%m-%d %H:%M:%S') [${SCRIPT_NAME}] [INFO]${NC}  $1"; }
+warn()  { echo -e "${YELLOW}$(date '+%Y-%m-%d %H:%M:%S') [${SCRIPT_NAME}] [WARN]${NC}  $1"; }
+error() { echo -e "${RED}$(date '+%Y-%m-%d %H:%M:%S') [${SCRIPT_NAME}] [ERROR]${NC} $1" >&2; }
+
+# ── Logging Setup ────────────────────────────────────────────────────────────
+SCRIPT_NAME="team1"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LOG_DIR="${SCRIPT_DIR}/logs"
+mkdir -p "${LOG_DIR}"
+LOG_FILE="${LOG_DIR}/$(date +%Y%m%d_%H%M%S)_${SCRIPT_NAME}.log"
+exec > >(tee -a "${LOG_FILE}") 2>&1
+
+# ── Pre-flight Checks ─────────────────────────────────────────────────────────
+check_prereqs() {
+    echo ""
+    info "Checking prerequisites..."
+
+    if [ "$(whoami)" != "${USER}" ]; then
+        error "Run this script as user '${USER}' (current: $(whoami))"
+        exit 1
+    fi
+
+    if ! command -v docker &>/dev/null; then
+        warn "Docker not found. Installing..."
+        curl -fsSL https://get.docker.com | sh
+        sudo usermod -aG docker "${USER}"
+        info "Docker installed. Log out and back in, then re-run this script."
+        exit 0
+    fi
+    info "Docker found: $(docker --version)"
+
+    if ! ls /dev/video* &>/dev/null; then
+        error "No /dev/video* devices found. Connect and enable the camera:"
+        error "  sudo raspi-config   → Interface Options → Camera → Enable"
+        exit 1
+    fi
+    info "Camera devices: $(ls /dev/video* 2>/dev/null | tr '\n' ' ')"
+
+    if [ ! -f /etc/os-release ] || ! grep -qi "debian\|ubuntu" /etc/os-release; then
+        warn "Expected Debian/Ubuntu (Raspberry Pi OS). Continuing anyway..."
+    fi
+    info "All prerequisites met"
+}
+
+# ── Directory Setup ────────────────────────────────────────────────────────────
+setup_dirs() {
+    echo ""
+    info "Setting up directories..."
+    mkdir -p "${RESULTS_DIR}"
+    info "Results → ${RESULTS_DIR}"
+}
+
+# ── Data Drive Setup (when DATA_DRIVE=true) ─────────────────────────────────
+setup_data_drive() {
+    if [ "${DATA_DRIVE:-false}" != "true" ]; then
+        return
+    fi
+    echo ""
+    info "Data drive mode enabled (DATA_DRIVE=true)"
+
+    if ! mountpoint -q "${DATA_DRIVE_MOUNT}" 2>/dev/null; then
+        warn "${DATA_DRIVE_MOUNT} is not mounted"
+        warn "  Run ./setup-data-drive.sh sd first, or mount the exFAT partition manually"
+        warn "  Falling back to default results directory"
+        RESULTS_DIR="${HOME_DIR}/ultralytics/data"
+        INFERENCE_SCRIPT="${RESULTS_DIR}/run_yolo.py"
+        return
+    fi
+
+    if [ ! -f "${DATA_DRIVE_MOUNT}/${DATA_DRIVE_SENTINEL}" ]; then
+        warn "Sentinel file '${DATA_DRIVE_SENTINEL}' not found on ${DATA_DRIVE_MOUNT}"
+        warn "  Run ./setup-data-drive.sh sd to initialise the data partition"
+        warn "  Falling back to default results directory"
+        RESULTS_DIR="${HOME_DIR}/ultralytics/data"
+        INFERENCE_SCRIPT="${RESULTS_DIR}/run_yolo.py"
+        return
+    fi
+
+    mkdir -p "${RESULTS_DIR}"
+    local nframes
+    nframes=$(ls -1 "${RESULTS_DIR}"/detect_*.jpg 2>/dev/null | wc -l)
+    info "Data drive: ${DATA_DRIVE_MOUNT} (${nframes} existing detection files)"
+}
+
+# ── Pull Docker Image ──────────────────────────────────────────────────────────
+pull_image() {
+    echo ""
+    info "Pulling ${IMAGE}..."
+    docker pull "${IMAGE}"
+    info "Image pulled successfully"
+}
+
+# ── Export NCNN Model ──────────────────────────────────────────────────────────
+export_model() {
+    echo ""
+    info "Exporting YOLO${MODEL_NAME#yolo} to NCNN format (may take 5-15 min on Pi 4)..."
+    docker run --rm --ipc=host \
+        -v "${RESULTS_DIR}:/ultralytics/data" \
+        "${IMAGE}" \
+        sh -c "
+            yolo export model=${MODEL_NAME}.pt format=ncnn imgsz=320 && \
+            cp -r ${MODEL_NAME}_ncnn_model /ultralytics/data/ && \
+            rm -rf ${MODEL_NAME}_ncnn_model ${MODEL_NAME}.pt
+        "
+    info "Model exported to ${RESULTS_DIR}/${MODEL_NAME}_ncnn_model"
+}
+
+# ── Create Inference Script ────────────────────────────────────────────────────
+create_inference_script() {
+    echo ""
+    info "Creating inference script..."
+
+    cat > "${INFERENCE_SCRIPT}" << 'PYEOF'
+#!/usr/bin/env python3
+"""YOLO inference for Pi 4 + Camera v2 — saves frames only when detections found.
+
+Environment variables (all optional):
+  FRAME_SKIP=N    Process every Nth frame (default: 1 = every frame)
+  CONF_THRESH=N   Confidence threshold (default: 0.25)
+  IOU_THRESH=N    IoU threshold (default: 0.45)
+  IMGSZ=N         Inference image size (default: 320)
+"""
+
+import os
+import sys
+import time
+import json
+import signal
+import logging
+
+import cv2
+from ultralytics import YOLO
+
+# picamera2 is optional — fall back to OpenCV V4L2 if unavailable
+try:
+    from picamera2 import Picamera2
+    HAVE_PICAMERA2 = True
+except ImportError:
+    HAVE_PICAMERA2 = False
+
+# ── Configuration ──────────────────────────────────────────────────────────────
+MODEL_PATH  = "/ultralytics/data/yolo26n_ncnn_model"
+OUTPUT_DIR  = "/ultralytics/data"
+FRAME_SKIP  = int(os.environ.get("FRAME_SKIP", "1"))
+CONF_THRESH = float(os.environ.get("CONF_THRESH", "0.25"))
+IOU_THRESH  = float(os.environ.get("IOU_THRESH", "0.45"))
+IMGSZ       = int(os.environ.get("IMGSZ", "320"))
+
+running = True
+
+def signal_handler(signum, frame):
+    global running
+    logging.info("Received signal %d, shutting down gracefully...", signum)
+    running = False
+
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+log = logging.getLogger("yolo_pi")
+
+# ── Camera Initialisation ──────────────────────────────────────────────────────
+
+def init_camera_picamera2():
+    """Initialise Pi Camera v2 via picamera2."""
+    for attempt in range(5):
+        try:
+            picam2 = Picamera2()
+            config = picam2.create_preview_configuration(
+                main={"size": (640, 480), "format": "RGB888"}
+            )
+            picam2.configure(config)
+            picam2.start()
+            time.sleep(2)
+            log.info("Camera initialised (picamera2)")
+            return picam2
+        except Exception as e:
+            log.warning("picamera2 attempt %d/5 failed: %s", attempt + 1, e)
+            time.sleep(2)
+    raise RuntimeError("Could not initialise camera via picamera2 after 5 attempts")
+
+
+def init_camera_v4l2():
+    """Initialise camera via OpenCV V4L2 fallback."""
+    for device_idx in (0, 1, 2, 3):
+        path = f"/dev/video{device_idx}"
+        if not os.path.exists(path):
+            continue
+        for attempt in range(3):
+            try:
+                cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+                if not cap.isOpened():
+                    cap.release()
+                    continue
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                # Warm-up read
+                ret, _ = cap.read()
+                if ret:
+                    log.info("Camera initialised (V4L2 on %s)", path)
+                    return cap
+                cap.release()
+            except Exception as e:
+                log.warning("V4L2 attempt %d on %s failed: %s", attempt + 1, path, e)
+    raise RuntimeError("Could not initialise camera via V4L2 after all attempts")
+
+
+def init_camera():
+    """Initialise camera — try picamera2 first, fall back to OpenCV V4L2."""
+    if HAVE_PICAMERA2:
+        try:
+            return init_camera_picamera2()
+        except Exception as e:
+            log.warning("picamera2 failed (%s), falling back to V4L2", e)
+    return init_camera_v4l2()
+
+
+def capture_frame(cam):
+    """Capture a single frame from whichever backend is active."""
+    if HAVE_PICAMERA2 and isinstance(cam, Picamera2):
+        return cam.capture_array()
+    return cam.read()[1]
+
+# ── Main Loop ──────────────────────────────────────────────────────────────────
+def main():
+    global running
+
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    detections_log = os.path.join(OUTPUT_DIR, "detections.jsonl")
+
+    log.info("Loading model from %s", MODEL_PATH)
+    model = YOLO(MODEL_PATH)
+    log.info("Model loaded")
+
+    cam = init_camera()
+    frame_count = 0
+    saved_count = 0
+    last_debug = time.time()
+
+    log.info("Inference loop started (processing every %d frame(s))", FRAME_SKIP)
+
+    while running:
+        # ── Capture ──
+        try:
+            frame = capture_frame(cam)
+        except Exception as e:
+            log.error("Capture failed: %s — reinitialising camera", e)
+            time.sleep(1)
+            try:
+                if HAVE_PICAMERA2 and isinstance(cam, Picamera2):
+                    cam.stop()
+                else:
+                    cam.release()
+            except Exception:
+                pass
+            cam = init_camera()
+            continue
+
+        frame_count += 1
+
+        # ── Throttle: skip frames ──
+        if frame_count % FRAME_SKIP != 0:
+            time.sleep(0.005)
+            continue
+
+        # ── Inference ──
+        results = model(
+            frame,
+            imgsz=IMGSZ,
+            conf=CONF_THRESH,
+            iou=IOU_THRESH,
+            verbose=False,
+        )
+
+        # ── Check for detections ──
+        dets = results[0].boxes
+        has_detections = dets is not None and len(dets) > 0
+
+        # Log detection status periodically
+        now = time.time()
+        if now - last_debug >= 30:
+            status = f"Frame {frame_count} | " + (
+                f"{len(dets)} detection(s): {[model.names[int(c)] for c in dets.cls.tolist()]}"
+                if has_detections else "no detections"
+            )
+            log.info(status)
+            last_debug = now
+
+        if not has_detections:
+            continue
+
+        # ── Save annotated frame ──
+        annotated = results[0].plot()
+        ts = time.strftime("%Y%m%d_%H%M%S")
+        frame_path = os.path.join(OUTPUT_DIR, f"detect_{ts}.jpg")
+        cv2.imwrite(frame_path, annotated)
+
+        # ── Log detection to JSONL ──
+        classes = [model.names[int(c)] for c in dets.cls.tolist()]
+        confs   = [f"{c:.2f}" for c in dets.conf.tolist()]
+        summary = {
+            "timestamp": ts,
+            "frame": frame_count,
+            "detections": len(dets),
+            "classes": classes,
+            "confidences": confs,
+        }
+        with open(detections_log, "a") as f:
+            f.write(json.dumps(summary) + "\n")
+
+        saved_count += 1
+        log.info(
+            "SAVED  %s  (%d %s)",
+            frame_path,
+            len(dets),
+            ", ".join(f"{c} ({conf})" for c, conf in zip(classes, confs)),
+        )
+
+    # ── Cleanup ──
+    log.info("Shutdown — saved %d detection frames out of %d processed", saved_count, frame_count)
+    try:
+        if HAVE_PICAMERA2 and isinstance(cam, Picamera2):
+            cam.stop()
+        else:
+            cam.release()
+    except Exception:
+        pass
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
+PYEOF
+
+    chmod +x "${INFERENCE_SCRIPT}"
+    info "Inference script → ${INFERENCE_SCRIPT}"
+
+    # ── Create web gallery script (uses Python stdlib only — no Flask needed) ──
+    cat > "${RESULTS_DIR}/web_gallery.py" << 'PYEOF'
+#!/usr/bin/env python3
+"""Web gallery for Team 1 detection images — pure Python stdlib, no Flask.
+
+Access at http://<pi-ip>:5000 from any browser on the local network.
+Auto-refreshes every 10 seconds.
+"""
+import os
+import json
+import html
+import base64
+from pathlib import Path
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from urllib.parse import urlparse
+
+DATA_DIR = "/ultralytics/data"
+PORT = 5000
+
+GALLERY_HTML = """<!DOCTYPE html>
+<html>
+<head>
+  <title>YOLO Detections — Pi 4</title>
+  <meta http-equiv="refresh" content="10">
+  <style>
+    body { font-family: monospace; background: #111; color: #eee; margin: 20px; }
+    h1 { color: #4caf50; }
+    .gallery { display: grid; grid-template-columns: repeat(10, 1fr); gap: 12px; }
+    .card { background: #222; border-radius: 8px; padding: 8px; }
+    .card img { max-width: 100%; border-radius: 4px; display: block; }
+    .card .label { font-size: 12px; margin-top: 4px; color: #aaa; }
+    .stats { margin: 10px 0; color: #888; }
+  </style>
+</head>
+<body>
+  <h1>&#128269; YOLO Detections</h1>
+  <div class="stats">%s</div>
+  <div class="gallery">%s</div>
+</body>
+</html>"""
+
+
+class GalleryHandler(BaseHTTPRequestHandler):
+    """Serves detection images gallery using only Python stdlib."""
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/" or parsed.path == "":
+            self.send_gallery()
+        elif parsed.path.startswith("/image/"):
+            name = parsed.path.split("/image/", 1)[1]
+            self.send_image(name)
+        else:
+            self.send_error(404, "Not Found")
+
+    def send_gallery(self):
+        files = sorted(Path(DATA_DIR).glob("detect_*.jpg"), reverse=True)
+        n = len(files)
+        stats = f"{n} detection image{'s' if n != 1 else ''} — latest first — auto-refresh every 10s"
+
+        cards = []
+        for f in files[:50]:
+            label = html.escape(f.stem.replace("detect_", ""))
+            name = html.escape(f.name)
+            cards.append(
+                f'<div class="card">'
+                f'<a href="/image/{name}"><img src="/image/{name}"></a>'
+                f'<div class="label">{label}</div>'
+                f"</div>"
+            )
+
+        body = GALLERY_HTML % (html.escape(stats), "\n".join(cards))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body.encode())
+
+    def send_image(self, name):
+        name = os.path.basename(name)  # prevent path traversal
+        path = os.path.join(DATA_DIR, name)
+        if not os.path.isfile(path):
+            self.send_error(404, "Not Found")
+            return
+        with open(path, "rb") as f:
+            data = f.read()
+        b64 = base64.b64encode(data).decode()
+
+        # Build prev/next navigation from sorted detection images
+        all_files = sorted(Path(DATA_DIR).glob("detect_*.jpg"), reverse=True)
+        prev_name = next_name = ""
+        idx = 0
+        total = len(all_files)
+        for i, f in enumerate(all_files):
+            if f.name == name:
+                idx = i + 1
+                if i > 0:
+                    prev_name = all_files[i - 1].name
+                if i < total - 1:
+                    next_name = all_files[i + 1].name
+                break
+
+        nav_prev = ('<a id="prevLink" href="/image/%s">&larr; Prev</a>'
+                    % html.escape(prev_name)) if prev_name else '<span style="color:#444;">&larr; Prev</span>'
+        nav_next = ('<a id="nextLink" href="/image/%s">Next &rarr;</a>'
+                    % html.escape(next_name)) if next_name else '<span style="color:#444;">Next &rarr;</span>'
+
+        body = """<!DOCTYPE html>
+<html>
+<head>
+  <title>%s</title>
+  <style>
+    body { background: #111; color: #eee; font-family: monospace; text-align: center; padding: 20px; margin: 0; }
+    .nav { padding: 12px 0; display: flex; justify-content: center; gap: 20px; }
+    .nav a { color: #4caf50; text-decoration: none; font-size: 16px; }
+    .nav a:hover { text-decoration: underline; }
+    .nav .pos { color: #555; font-size: 13px; }
+    img { max-width: 95vw; max-height: 85vh; border-radius: 4px; }
+  </style>
+  <script>
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') { history.back(); }
+      if (e.key === 'ArrowLeft') { var l = document.getElementById('prevLink'); if (l) l.click(); }
+      if (e.key === 'ArrowRight') { var l = document.getElementById('nextLink'); if (l) l.click(); }
+    });
+  </script>
+</head>
+<body>
+  <div class="nav"><a href="/">&larr; Back to Gallery</a>  %s  %s  <span class="pos">Image %d of %d</span></div>
+  <img src="data:image/jpeg;base64,%s" alt="%s">
+</body>
+</html>""" % (html.escape(name), nav_prev, nav_next, idx, total, b64, html.escape(name))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body.encode())
+
+    def log_message(self, format, *args):
+        """Suppress default HTTP log output."""
+        pass
+
+
+if __name__ == "__main__":
+    server = HTTPServer(("0.0.0.0", PORT), GalleryHandler)
+    print(f"Gallery running at http://0.0.0.0:{PORT}")
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        server.server_close()
+PYEOF
+
+    chmod +x "${RESULTS_DIR}/web_gallery.py"
+    info "Web gallery script → ${RESULTS_DIR}/web_gallery.py"
+}
+
+# ── Create Systemd Service ─────────────────────────────────────────────────────
+create_systemd_service() {
+    echo ""
+    info "Creating systemd service..."
+
+    sudo tee "/etc/systemd/system/${SERVICE_NAME}" > /dev/null << SVC
+[Unit]
+Description=Ultralytics YOLO Docker Inference (Pi 4 + Camera v2)
+After=docker.service
+Requires=docker.service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=10
+User=${USER}
+ExecStartPre=-/usr/bin/docker start ${CONTAINER_NAME}
+ExecStart=/usr/bin/docker exec ${CONTAINER_NAME} python3 /ultralytics/data/run_yolo.py
+ExecStop=/usr/bin/docker stop ${CONTAINER_NAME}
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
+SVC
+
+    info "Service file → /etc/systemd/system/${SERVICE_NAME}"
+}
+
+# ── Create Docker Container ────────────────────────────────────────────────────
+create_container() {
+    echo ""
+    info "Creating Docker container..."
+
+    docker rm -f "${CONTAINER_NAME}" 2>/dev/null || true
+
+    # Build --device flags only for video devices that actually exist
+    VIDEO_DEVICES=$(ls /dev/video* 2>/dev/null || true)
+    DEVICE_FLAGS=""
+    for dev in ${VIDEO_DEVICES}; do
+        DEVICE_FLAGS="${DEVICE_FLAGS} --device ${dev}:${dev}"
+    done
+
+    # shellcheck disable=SC2086
+    docker run -d \
+        --name "${CONTAINER_NAME}" \
+        --restart no \
+        --ipc=host \
+        --net=host \
+        -v "${RESULTS_DIR}:/ultralytics/data" \
+        ${DEVICE_FLAGS} \
+        -v /run/udev:/run/udev:ro \
+        "${IMAGE}" \
+        tail -f /dev/null
+
+    info "Container '${CONTAINER_NAME}' created"
+
+    # Remove picamera2 if previously installed (it requires libcamera which isn't
+    # available in the Ubuntu container). The inference script uses OpenCV V4L2.
+    info "Removing picamera2 (incompatible with Ubuntu container)..."
+    if docker exec "${CONTAINER_NAME}" pip uninstall -y picamera2 2>&1; then
+        info "picamera2 removed successfully"
+    else
+        warn "picamera2 not found or already removed — continuing"
+    fi
+    info "Camera access via OpenCV V4L2 (picamera2 not required)"
+}
+
+# ── Enable & Start Service ─────────────────────────────────────────────────────
+enable_service() {
+    echo ""
+    info "Enabling and starting systemd service..."
+    sudo systemctl daemon-reload
+    sudo systemctl enable "${SERVICE_NAME}"
+    sudo systemctl start "${SERVICE_NAME}"
+    info "Service '${SERVICE_NAME}' enabled (auto-starts on boot)"
+}
+
+# ── Status ─────────────────────────────────────────────────────────────────────
+cmd_status() {
+    echo ""
+    echo "═══════════════════════ Deployment Status ═══════════════════════"
+    echo ""
+    echo "── Data Drive ──"
+    if mountpoint -q "${DATA_DRIVE_MOUNT}" 2>/dev/null; then
+        local sentinel_ok="no"
+        [ -f "${DATA_DRIVE_MOUNT}/${DATA_DRIVE_SENTINEL}" ] && sentinel_ok="yes"
+        local free_space
+        free_space=$(df -h "${DATA_DRIVE_MOUNT}" | awk 'NR==2 {print $4}')
+        echo "  Mount: ${DATA_DRIVE_MOUNT} ✓  Free: ${free_space}  Sentinel: ${sentinel_ok}"
+        echo "  Team 1 path: ${DATA_DRIVE_MOUNT}/team1"
+    else
+        if [ "${DATA_DRIVE:-false}" = "true" ]; then
+            echo "  ! DATA_DRIVE=true but ${DATA_DRIVE_MOUNT} is NOT mounted"
+            echo "  ! Run: ./setup-data-drive.sh sd"
+        else
+            echo "  Not configured (set DATA_DRIVE=true to use exFAT data partition)"
+        fi
+    fi
+    echo ""
+    echo "── Container ──"
+    if docker ps --filter "name=${CONTAINER_NAME}" --format "{{.Names}}  {{.Status}}" | grep -q "${CONTAINER_NAME}"; then
+        docker ps --filter "name=${CONTAINER_NAME}" --format "  {{.Names}}  {{.Status}}  {{.Image}}"
+    else
+        echo "  (not running)"
+        docker ps -a --filter "name=${CONTAINER_NAME}" --format "  {{.Names}}  {{.Status}}  {{.Image}}" 2>/dev/null || true
+    fi
+    echo ""
+    echo "── Service ──"
+    sudo systemctl status "${SERVICE_NAME}" --no-pager 2>&1 | head -12
+    echo ""
+    echo "── Results ──"
+    if [ -d "${RESULTS_DIR}" ]; then
+        echo "  Directory: ${RESULTS_DIR}"
+        nframes=$(ls -1 "${RESULTS_DIR}"/detect_*.jpg 2>/dev/null | wc -l)
+        ndets=$(wc -l < "${RESULTS_DIR}/detections.jsonl" 2>/dev/null || echo "0")
+        echo "  Saved frames: ${nframes}"
+        echo "  Detection logs: ${ndets} entries"
+        echo ""
+        echo "  Last 3 detections:"
+        if [ -f "${RESULTS_DIR}/detections.jsonl" ] && [ "$(wc -l < "${RESULTS_DIR}/detections.jsonl")" -gt 0 ]; then
+            tail -3 "${RESULTS_DIR}/detections.jsonl" | while IFS= read -r line; do
+                echo "    $(echo "$line" | python3 -m json.tool 2>/dev/null || echo "$line")"
+            done
+        else
+            echo "    (none yet)"
+        fi
+    else
+        echo "  Directory ${RESULTS_DIR} not found"
+    fi
+    echo ""
+    echo "════════════════════════════════════════════════════════════════"
+}
+
+# ── Logs ───────────────────────────────────────────────────────────────────────
+cmd_logs() {
+    sudo journalctl -fu "${SERVICE_NAME}"
+}
+
+# ── Stop ───────────────────────────────────────────────────────────────────────
+cmd_stop() {
+    echo "Stopping service..."
+    sudo systemctl stop "${SERVICE_NAME}"
+    echo "Service stopped"
+}
+
+# ── Start ──────────────────────────────────────────────────────────────────────
+cmd_start() {
+    echo "Starting service..."
+    sudo systemctl start "${SERVICE_NAME}"
+    echo "Service started"
+    sleep 2
+    cmd_status
+}
+
+# ── Restart ────────────────────────────────────────────────────────────────────
+cmd_restart() {
+    echo "Restarting service..."
+    sudo systemctl restart "${SERVICE_NAME}"
+    echo "Service restarted"
+    sleep 2
+    cmd_status
+}
+
+# ── Shell ──────────────────────────────────────────────────────────────────────
+cmd_shell() {
+    docker exec -it "${CONTAINER_NAME}" bash
+}
+
+# ── Web Gallery ────────────────────────────────────────────────────────────────
+cmd_gallery() {
+    echo ""
+    echo "Starting web gallery on port 5000..."
+    echo "Access it at http://<pi-ip>:5000 from any browser."
+    echo "Press Ctrl+C to stop."
+    echo ""
+    docker exec -it "${CONTAINER_NAME}" python3 /ultralytics/data/web_gallery.py
+}
+
+# ── Snapshot ───────────────────────────────────────────────────────────────────
+cmd_snapshot() {
+    echo ""
+    info "Capturing a single test frame (no YOLO)..."
+    # Ensure picamera2 is not installed (conflicts with missing libcamera)
+    docker exec "${CONTAINER_NAME}" pip uninstall -y picamera2 2>&1 > /dev/null || true
+    docker exec "${CONTAINER_NAME}" python3 -c "
+import cv2, os, time
+# Try each video device until one works
+for dev in range(4):
+    path = f'/dev/video{dev}'
+    if not os.path.exists(path):
+        continue
+    cap = cv2.VideoCapture(path, cv2.CAP_V4L2)
+    if not cap.isOpened():
+        continue
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+    time.sleep(0.5)
+    ret, frame = cap.read()
+    cap.release()
+    if ret:
+        cv2.imwrite('/ultralytics/data/snapshot.jpg', frame)
+        print(f'OK (device {path})')
+        break
+    else:
+        print(f'FAIL: {path} opened but no frame')
+" && info "Saved → ${RESULTS_DIR}/snapshot.jpg" || error "Snapshot failed. Check camera."
+}
+
+# ── Main ───────────────────────────────────────────────────────────────────────
+usage() {
+    echo "Usage: $0 [command]"
+    echo ""
+    echo "Commands:"
+    echo "  (none)    Full setup (install, configure, enable)"
+    echo "  status    Show deployment status"
+    echo "  logs      Follow live inference logs (Ctrl+C to exit)"
+    echo "  gallery   Start web gallery for detection images (port 5000)"
+    echo "  snapshot  Capture a single test frame (no YOLO)"
+    echo "  stop      Stop the service"
+    echo "  start     Start the service"
+    echo "  restart   Restart the service"
+    echo "  shell     Open a shell inside the container"
+    echo ""
+    echo "Environment:"
+    echo "  DATA_DRIVE=true    Use exFAT data partition (/mnt/wildlife-data/team1)"
+}
+
+case "${1:-setup}" in
+    setup)
+        echo ""
+        echo "  ╔══════════════════════════════════════════════════╗"
+        echo "  ║  Ultralytics YOLO  —  Team 1  —  Docker Setup  ║"
+        echo "  ║  Pi 4 + Camera v2  —  saves on detection only  ║"
+        echo "  ║  DATA_DRIVE=${DATA_DRIVE:-false}                         ║"
+        echo "  ╚══════════════════════════════════════════════════╝"
+        check_prereqs
+        setup_data_drive
+        setup_dirs
+        pull_image
+        if [ ! -d "${RESULTS_DIR}/${MODEL_NAME}_ncnn_model" ]; then
+            export_model
+        else
+            info "NCNN model already exists at ${RESULTS_DIR}/${MODEL_NAME}_ncnn_model"
+        fi
+        create_inference_script
+        create_container
+        create_systemd_service
+        enable_service
+        echo ""
+        info "Setup complete!"
+        cmd_status
+        echo ""
+        echo "  Quick commands:"
+        echo "    $0 status    → deployment health"
+        echo "    $0 logs      → live inference output"
+        echo "    $0 gallery   → browse detection images (http://<pi-ip>:5000)"
+        echo "    $0 snapshot  → capture a test frame"
+        echo "    $0 shell     → enter the container"
+        echo ""
+        ;;
+    status)
+        cmd_status
+        ;;
+    logs)
+        cmd_logs
+        ;;
+    stop)
+        cmd_stop
+        ;;
+    start)
+        cmd_start
+        ;;
+    restart)
+        cmd_restart
+        ;;
+    shell)
+        cmd_shell
+        ;;
+    gallery)
+        cmd_gallery
+        ;;
+    snapshot)
+        cmd_snapshot
+        ;;
+    --help|-h)
+        usage
+        ;;
+    *)
+        echo "Unknown command: $1"
+        usage
+        exit 1
+        ;;
+esac

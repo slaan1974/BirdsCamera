@@ -1,0 +1,7 @@
+⚠ libcamera-hello not found on host (install: sudo apt install libcamera-apps)
+
+
+slaan1974@BirdsCamera:~ $ libcamera-hello
+bash: libcamera-hello: command not found
+slaan1974@BirdsCamera:~ $ rpicam-
+rpicam-hello  rpicam-jpeg   rpicam-raw    rpicam-still  rpicam-vid    

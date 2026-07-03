@@ -1,0 +1,36 @@
+docker exec ultralytics-pi-cam pip install picamera2
+Collecting picamera2
+  Downloading picamera2-0.3.36-py3-none-any.whl.metadata (6.4 kB)
+Requirement already satisfied: numpy in /usr/local/lib/python3.12/dist-packages (from picamera2) (1.26.4)
+Collecting PiDNG (from picamera2)
+  Downloading pidng-4.0.9.tar.gz (21 kB)
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'done'
+Collecting piexif (from picamera2)
+  Downloading piexif-1.1.3-py2.py3-none-any.whl.metadata (3.7 kB)
+Requirement already satisfied: pillow in /usr/local/lib/python3.12/dist-packages (from picamera2) (12.2.0)
+Collecting simplejpeg (from picamera2)
+  Downloading simplejpeg-1.9.0-cp312-cp312-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl.metadata (8.6 kB)
+Collecting videodev2 (from picamera2)
+  Downloading videodev2-0.0.4-py3-none-any.whl.metadata (2.8 kB)
+Collecting python-prctl (from picamera2)
+  Downloading python-prctl-1.8.1.tar.gz (28 kB)
+  Preparing metadata (setup.py): started
+  Preparing metadata (setup.py): finished with status 'error'
+  error: subprocess-exited-with-error
+  
+  × python setup.py egg_info did not run successfully.
+  │ exit code: 1
+  ╰─> [2 lines of output]
+      You need to install libc development headers to build this module
+      You need to install libcap development headers to build this module
+      [end of output]
+  
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+error: metadata-generation-failed
+
+× Encountered error while generating package metadata.
+╰─> See above for output.
+
+note: This is an issue with the package mentioned above, not pip.
+hint: See above for details.

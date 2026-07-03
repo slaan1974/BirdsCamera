@@ -1,0 +1,12 @@
+
+slaan1974@BirdsCamera:~ $ ./team1 gallery
+
+Starting web gallery on port 5000...
+Access it at http://<pi-ip>:5000 from any browser.
+Press Ctrl+C to stop.
+
+Traceback (most recent call last):
+  File "/ultralytics/data/web_gallery.py", line 10, in <module>
+    from flask import Flask, send_file, render_template_string
+ModuleNotFoundError: No module named 'flask'
+slaan1974@BirdsCamera:~ $ 

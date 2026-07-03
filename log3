@@ -1,0 +1,142 @@
+Setting up libheif-plugin-aomenc:arm64 (1.17.6-1ubuntu4.4) ...
+Processing triggers for libc-bin (2.39-0ubuntu8.7) ...
+  error: subprocess-exited-with-error
+  
+  × python setup.py bdist_wheel did not run successfully.
+  │ exit code: 1
+  ╰─> [90 lines of output]
+      /usr/local/lib/python3.12/dist-packages/setuptools/dist.py:765: SetuptoolsDeprecationWarning: License classifiers are deprecated.
+      !!
+      
+              ********************************************************************************
+              Please consider removing the following classifiers in favor of a SPDX license expression:
+      
+              License :: OSI Approved :: MIT License
+      
+              See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+              ********************************************************************************
+      
+      !!
+        self._finalize_license_expression()
+      running bdist_wheel
+      running build
+      running build_py
+      creating build/lib.linux-aarch64-cpython-312/pidng
+      copying src/pidng/packing.py -> build/lib.linux-aarch64-cpython-312/pidng
+      copying src/pidng/__init__.py -> build/lib.linux-aarch64-cpython-312/pidng
+      copying src/pidng/defs.py -> build/lib.linux-aarch64-cpython-312/pidng
+      copying src/pidng/core.py -> build/lib.linux-aarch64-cpython-312/pidng
+      copying src/pidng/legacy.py -> build/lib.linux-aarch64-cpython-312/pidng
+      copying src/pidng/camdefs.py -> build/lib.linux-aarch64-cpython-312/pidng
+      copying src/pidng/dng.py -> build/lib.linux-aarch64-cpython-312/pidng
+      running egg_info
+      writing src/pidng.egg-info/PKG-INFO
+      writing dependency_links to src/pidng.egg-info/dependency_links.txt
+      writing requirements to src/pidng.egg-info/requires.txt
+      writing top-level names to src/pidng.egg-info/top_level.txt
+      reading manifest file 'src/pidng.egg-info/SOURCES.txt'
+      reading manifest template 'MANIFEST.in'
+      adding license file 'LICENSE'
+      writing manifest file 'src/pidng.egg-info/SOURCES.txt'
+      /usr/local/lib/python3.12/dist-packages/setuptools/command/build_py.py:215: _Warning: Package 'pidng.liblj92' is absent from the `packages` configuration.
+      !!
+      
+              ********************************************************************************
+              ############################
+              # Package would be ignored #
+              ############################
+              Python recognizes 'pidng.liblj92' as an importable package[^1],
+              but it is absent from setuptools' `packages` configuration.
+      
+              This leads to an ambiguous overall configuration. If you want to distribute this
+              package, please make sure that 'pidng.liblj92' is explicitly added
+              to the `packages` configuration field.
+      
+              Alternatively, you can also rely on setuptools' discovery methods
+              (for example by using `find_namespace_packages(...)`/`find_namespace:`
+              instead of `find_packages(...)`/`find:`).
+      
+              You can read more about "package discovery" on setuptools documentation page:
+      
+              - https://setuptools.pypa.io/en/latest/userguide/package_discovery.html
+      
+              If you don't want 'pidng.liblj92' to be distributed and are
+              already explicitly excluding 'pidng.liblj92' via
+              `find_namespace_packages(...)/find_namespace` or `find_packages(...)/find`,
+              you can try to use `exclude_package_data`, or `include-package-data=False` in
+              combination with a more fine grained `package-data` configuration.
+      
+              You can read more about "package data files" on setuptools documentation page:
+      
+              - https://setuptools.pypa.io/en/latest/userguide/datafiles.html
+      
+      
+              [^1]: For Python, any directory (with suitable naming) can be imported,
+                    even if it does not contain any `.py` files.
+                    On the other hand, currently there is no concept of package data
+                    directory, all directories are treated like packages.
+              ********************************************************************************
+      
+      !!
+        check.warn(importable)
+      copying src/pidng/bitunpack.c -> build/lib.linux-aarch64-cpython-312/pidng
+      creating build/lib.linux-aarch64-cpython-312/pidng/liblj92
+      copying src/pidng/liblj92/lj92.c -> build/lib.linux-aarch64-cpython-312/pidng/liblj92
+      copying src/pidng/liblj92/lj92.h -> build/lib.linux-aarch64-cpython-312/pidng/liblj92
+      warning: build_py: byte-compiling is disabled, skipping.
+      
+      running build_ext
+      building 'ljpegCompress' extension
+      creating build/temp.linux-aarch64-cpython-312/src/pidng
+      creating build/temp.linux-aarch64-cpython-312/src/pidng/liblj92
+      aarch64-linux-gnu-gcc -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O2 -Wall -fPIC -I/usr/include/python3.12 -c src/pidng/bitunpack.c -o build/temp.linux-aarch64-cpython-312/src/pidng/bitunpack.o -std=gnu99
+      src/pidng/bitunpack.c:1:10: fatal error: Python.h: No such file or directory
+          1 | #include <Python.h>
+            |          ^~~~~~~~~~
+      compilation terminated.
+      error: command '/usr/bin/aarch64-linux-gnu-gcc' failed with exit code 1
+      [end of output]
+  
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+  ERROR: Failed building wheel for PiDNG
+  error: subprocess-exited-with-error
+  
+  × python setup.py bdist_wheel did not run successfully.
+  │ exit code: 1
+  ╰─> [29 lines of output]
+      /usr/local/lib/python3.12/dist-packages/setuptools/dist.py:765: SetuptoolsDeprecationWarning: License classifiers are deprecated.
+      !!
+      
+              ********************************************************************************
+              Please consider removing the following classifiers in favor of a SPDX license expression:
+      
+              License :: OSI Approved :: GNU General Public License (GPL)
+      
+              See https://packaging.python.org/en/latest/guides/writing-pyproject-toml/#license for details.
+              ********************************************************************************
+      
+      !!
+        self._finalize_license_expression()
+      running bdist_wheel
+      running build
+      running build_py
+      creating build/lib.linux-aarch64-cpython-312
+      copying prctl.py -> build/lib.linux-aarch64-cpython-312
+      warning: build_py: byte-compiling is disabled, skipping.
+      
+      running build_ext
+      building '_prctl' extension
+      creating build/temp.linux-aarch64-cpython-312
+      aarch64-linux-gnu-gcc -fno-strict-overflow -Wsign-compare -DNDEBUG -g -O2 -Wall -fPIC -I/usr/include/python3.12 -c _prctlmodule.c -o build/temp.linux-aarch64-cpython-312/_prctlmodule.o
+      _prctlmodule.c:7:10: fatal error: Python.h: No such file or directory
+          7 | #include <Python.h>
+            |          ^~~~~~~~~~
+      compilation terminated.
+      error: command '/usr/bin/aarch64-linux-gnu-gcc' failed with exit code 1
+      [end of output]
+  
+  note: This error originates from a subprocess, and is likely not a problem with pip.
+  ERROR: Failed building wheel for python-prctl
+ERROR: Could not build wheels for PiDNG, python-prctl, which is required to install pyproject.toml-based projects
+[WARN]  picamera2 install had issues — check with: ./support camera
+
