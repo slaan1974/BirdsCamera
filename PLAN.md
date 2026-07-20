@@ -9,6 +9,7 @@
 This document covers everything needed to run [Ultralytics YOLO](https://github.com/ultralytics/ultralytics) — the latest YOLO26 models (and YOLOv8/YOLO11) — on a **Raspberry Pi 4**. The guide is based on the official Ultralytics documentation found in `docs/en/guides/raspberry-pi.md`, `docs/en/guides/coral-edge-tpu-on-raspberry-pi.md`, and supporting integration docs.
 
 **Key facts:**
+
 - The repo already has extensive Raspberry Pi support (detection via `is_raspberrypi()` in `ultralytics/utils/__init__.py:783`)
 - An ARM64 Docker image exists at `ultralytics/ultralytics:latest-arm64`
 - CI runs benchmarks on a self-hosted Pi runner
@@ -18,15 +19,15 @@ This document covers everything needed to run [Ultralytics YOLO](https://github.
 
 ## 2. Raspberry Pi 4 Hardware Specifications
 
-| Spec | Value |
-|------|-------|
-| CPU | Broadcom BCM2711, Cortex-A72 64-bit, 4 cores @ 1.8GHz |
-| GPU | VideoCore VI @ 500MHz |
-| RAM | 1GB / 2GB / 4GB / 8GB LPDDR4-3200 |
-| USB | 2× USB 3.0, 2× USB 2.0 |
-| Camera | MIPI CSI (22-pin connector, **different from Pi 5's 15-pin**) |
-| Power | 3A@5V (USB-C) |
-| **Recommended model** | **4GB or 8GB** for YOLO inference |
+| Spec                  | Value                                                         |
+| --------------------- | ------------------------------------------------------------- |
+| CPU                   | Broadcom BCM2711, Cortex-A72 64-bit, 4 cores @ 1.8GHz         |
+| GPU                   | VideoCore VI @ 500MHz                                         |
+| RAM                   | 1GB / 2GB / 4GB / 8GB LPDDR4-3200                             |
+| USB                   | 2× USB 3.0, 2× USB 2.0                                        |
+| Camera                | MIPI CSI (22-pin connector, **different from Pi 5's 15-pin**) |
+| Power                 | 3A@5V (USB-C)                                                 |
+| **Recommended model** | **4GB or 8GB** for YOLO inference                             |
 
 ---
 
@@ -38,6 +39,7 @@ This document covers everything needed to run [Ultralytics YOLO](https://github.
    - **Important:** Pre-configure SSH, Wi-Fi, and user credentials in the Imager
 
 2. Boot and initial setup:
+
    ```bash
    sudo apt update && sudo apt upgrade -y
    sudo apt install git curl wget -y
@@ -59,6 +61,7 @@ sudo docker pull $t && sudo docker run -it --ipc=host $t
 ```
 
 Docker image is based on `arm64v8/ubuntu:24.04`, pre-installed with:
+
 - Python 3, PyTorch (CPU), OpenCV
 - All export dependencies (ONNX, OpenVINO, TensorFlow)
 - Pre-downloaded YOLO26n model weights
@@ -83,11 +86,13 @@ pip install ultralytics[export]
 ```
 
 **Dependency notes** (from `pyproject.toml`):
+
 - Core: `torch>=1.8.0`, `torchvision>=0.9.0`, `opencv-python`, `numpy`, `pillow`
 - For export: `onnx`, `onnxruntime`, `openvino`, `tensorflow`, `tensorstore` (aarch64-specific)
 - TensorFlow on aarch64 needs `tensorstore>=0.1.63` and avoids `h5py==3.11.0` (no aarch64 wheel)
 
 **For inference-only (no export), install base package:**
+
 ```bash
 pip install ultralytics
 ```
@@ -100,20 +105,20 @@ Then export models on a more powerful machine (see section 6).
 
 ### 5.1 Export Formats Available on Pi
 
-| Format | Export on Pi? | Pi 4 Performance Estimate | Notes |
-|--------|:------------:|:------------------------:|-------|
-| PyTorch | ✅ Yes | ~300ms (baseline) | Default .pt format |
-| TorchScript | ✅ Yes | ~360ms | |
-| **ONNX** | **✅ Yes** | **~130ms** | Good intermediate format |
-| **OpenVINO** | **✅ Yes** | **~71ms** | Intel toolkit, works on ARM! |
-| **NCNN** | **✅ Yes** | **~68ms** | **RECOMMENDED — best on Pi** |
-| **MNN** | **✅ Yes** | **~91ms** | Strong competitor |
-| ExecuTorch | ✅ Yes | ~148ms | |
-| TF SavedModel | ✅ Yes | ~214ms | |
-| TF GraphDef | ✅ Yes | ~214ms | |
-| TF Lite | ⚠️ Yes (no NMS) | ~251ms | NMS export fails on ARM64 |
-| Edge TPU | ❌ No | See Coral guide | Must export on x86_64/Colab |
-| TF.js | ❌ No | N/A | Unsupported on ARM64 Linux |
+| Format        |  Export on Pi?  | Pi 4 Performance Estimate | Notes                        |
+| ------------- | :-------------: | :-----------------------: | ---------------------------- |
+| PyTorch       |     ✅ Yes      |     ~300ms (baseline)     | Default .pt format           |
+| TorchScript   |     ✅ Yes      |          ~360ms           |                              |
+| **ONNX**      |   **✅ Yes**    |        **~130ms**         | Good intermediate format     |
+| **OpenVINO**  |   **✅ Yes**    |         **~71ms**         | Intel toolkit, works on ARM! |
+| **NCNN**      |   **✅ Yes**    |         **~68ms**         | **RECOMMENDED — best on Pi** |
+| **MNN**       |   **✅ Yes**    |         **~91ms**         | Strong competitor            |
+| ExecuTorch    |     ✅ Yes      |          ~148ms           |                              |
+| TF SavedModel |     ✅ Yes      |          ~214ms           |                              |
+| TF GraphDef   |     ✅ Yes      |          ~214ms           |                              |
+| TF Lite       | ⚠️ Yes (no NMS) |          ~251ms           | NMS export fails on ARM64    |
+| Edge TPU      |      ❌ No      |      See Coral guide      | Must export on x86_64/Colab  |
+| TF.js         |      ❌ No      |            N/A            | Unsupported on ARM64 Linux   |
 
 **Pi 4 vs Pi 5 expectation:** Pi 4 runs ~30-40% slower than Pi 5 (based on Coral Edge TPU guide benchmarks showing Pi 5 is ~22% faster on standard mode and ~30% faster on high-frequency mode).
 
@@ -148,8 +153,10 @@ yolo benchmark model=yolo26n.pt data=coco128.yaml imgsz=640
 ```
 
 Or in Python:
+
 ```python
 from ultralytics import YOLO
+
 model = YOLO("yolo26n.pt")
 results = model.benchmark(data="coco128.yaml", imgsz=640)
 ```
@@ -177,6 +184,7 @@ results = model("path/to/video.mp4")
 ```
 
 CLI equivalent:
+
 ```bash
 yolo predict model=yolo26n.pt source='https://ultralytics.com/images/bus.jpg'
 ```
@@ -186,6 +194,7 @@ yolo predict model=yolo26n.pt source='https://ultralytics.com/images/bus.jpg'
 ```python
 # Step 1: Export to NCNN (creates yolo26n_ncnn_model/ directory)
 from ultralytics import YOLO
+
 model = YOLO("yolo26n.pt")
 model.export(format="ncnn")
 
@@ -195,6 +204,7 @@ results = ncnn_model("https://ultralytics.com/images/bus.jpg")
 ```
 
 CLI:
+
 ```bash
 yolo export model=yolo26n.pt format=ncnn
 yolo predict model='yolo26n_ncnn_model' source='https://ultralytics.com/images/bus.jpg'
@@ -219,6 +229,7 @@ results = ov_model("image.jpg")
 **Pi 4 uses a 22-pin CSI connector** (Pi 5 uses 15-pin). Standard Raspberry Pi Camera modules work directly with Pi 4 without adapters.
 
 Compatible cameras:
+
 - Raspberry Pi Camera Module 3
 - Raspberry Pi Camera Module 2
 - Raspberry Pi HQ Camera
@@ -228,6 +239,7 @@ Compatible cameras:
 ```python
 import cv2
 from picamera2 import Picamera2
+
 from ultralytics import YOLO
 
 picam2 = Picamera2()
@@ -253,11 +265,13 @@ cv2.destroyAllWindows()
 ### 7.3 Method 2: TCP Stream via rpicam-vid
 
 Terminal 1 — start TCP stream:
+
 ```bash
 rpicam-vid -n -t 0 --inline --listen -o tcp://127.0.0.1:8888
 ```
 
 Terminal 2 — run YOLO on the stream:
+
 ```bash
 yolo predict model=yolo26n_ncnn_model source="tcp://127.0.0.1:8888"
 ```
@@ -268,19 +282,20 @@ yolo predict model=yolo26n_ncnn_model source="tcp://127.0.0.1:8888"
 
 ### 8.1 System-Level Optimizations
 
-| Optimization | Effect | Instructions |
-|-------------|:------:|-------------|
-| Use Raspberry Pi OS Lite | Saves ~300MB RAM | Flash OS without desktop |
-| Use USB 3.0 SSD | Much faster I/O | Boot from SSD instead of SD |
-| Overclock CPU to 2.0GHz | ~10% faster | `arm_freq=2000` in `/boot/firmware/config.txt` |
-| Overclock GPU to 600MHz | Helps NCNN | `gpu_freq=600` |
-| Increase GPU memory | 128-256MB recommended | `gpu_mem=256` |
-| Disable unnecessary services | More CPU for inference | `sudo systemctl disable bluetooth` etc. |
-| Use swap (if low RAM) | Avoid OOM on 1-2GB models | `sudo dphys-swapfile swapoff && edit CONF_SWAPSIZE=2048 in /etc/dphys-swapfile && sudo dphys-swapfile setup && sudo dphys-swapfile swapon` |
+| Optimization                 |          Effect           | Instructions                                                                                                                               |
+| ---------------------------- | :-----------------------: | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Use Raspberry Pi OS Lite     |     Saves ~300MB RAM      | Flash OS without desktop                                                                                                                   |
+| Use USB 3.0 SSD              |      Much faster I/O      | Boot from SSD instead of SD                                                                                                                |
+| Overclock CPU to 2.0GHz      |        ~10% faster        | `arm_freq=2000` in `/boot/firmware/config.txt`                                                                                             |
+| Overclock GPU to 600MHz      |        Helps NCNN         | `gpu_freq=600`                                                                                                                             |
+| Increase GPU memory          |   128-256MB recommended   | `gpu_mem=256`                                                                                                                              |
+| Disable unnecessary services |  More CPU for inference   | `sudo systemctl disable bluetooth` etc.                                                                                                    |
+| Use swap (if low RAM)        | Avoid OOM on 1-2GB models | `sudo dphys-swapfile swapoff && edit CONF_SWAPSIZE=2048 in /etc/dphys-swapfile && sudo dphys-swapfile setup && sudo dphys-swapfile swapon` |
 
 ### 8.2 Overclocking Config
 
 Edit `/boot/firmware/config.txt`:
+
 ```ini
 arm_freq=2000
 gpu_freq=600
@@ -309,6 +324,7 @@ results = model("image.jpg", imgsz=320, max_det=10, conf=0.25, iou=0.45)
 ## 9. Coral Edge TPU (Optional Hardware Accelerator)
 
 ### 9.1 What You Need
+
 - Raspberry Pi 4 (2GB+ recommended)
 - [Coral USB Accelerator](https://coral.ai/products/accelerator/)
 - USB 3.0 port (for maximum throughput)
@@ -317,14 +333,17 @@ results = model("image.jpg", imgsz=320, max_det=10, conf=0.25, iou=0.45)
 ### 9.2 Workflow
 
 **Step 1 — Export on x86_64 machine or Colab:**
+
 ```python
 from ultralytics import YOLO
+
 model = YOLO("yolo26n.pt")
 model.export(format="edgetpu")
 # Produces: yolo26n_full_integer_quant_edgetpu.tflite
 ```
 
 **Step 2 — Install Edge TPU runtime on Pi 4:**
+
 ```bash
 # Download from https://github.com/feranick/libedgetpu/releases
 # Choose the .deb for Bookworm 64-bit arm64
@@ -336,8 +355,10 @@ pip install -U tflite-runtime
 ```
 
 **Step 3 — Run on Pi 4:**
+
 ```python
 from ultralytics import YOLO
+
 model = YOLO("yolo26n_full_integer_quant_edgetpu.tflite")
 results = model("image.jpg")
 ```
@@ -345,9 +366,9 @@ results = model("image.jpg")
 ### 9.3 Edge TPU Performance on Pi 4 (YOLOv8n benchmarks)
 
 | Image Size | Standard Mode | High-Frequency Mode |
-|:----------:|:-------------:|:-------------------:|
-| 320px | 32.2ms | 26.7ms |
-| 512px | 73.5ms | 60.7ms |
+| :--------: | :-----------: | :-----------------: |
+|   320px    |    32.2ms     |       26.7ms        |
+|   512px    |    73.5ms     |       60.7ms        |
 
 **Edge TPU + Pi 4 delivers ~15-30 FPS** at 320px with YOLO26n — better than any CPU-only format.
 
@@ -355,17 +376,17 @@ results = model("image.jpg")
 
 ## 10. Troubleshooting
 
-| Problem | Cause | Solution |
-|---------|-------|----------|
-| `pip install` fails on aarch64 | Missing wheels for some packages | Use `--extra-index-url https://download.pytorch.org/whl/cpu` |
-| TFLite NMS export fails | ONNX NMS opset not supported on aarch64 | Export on x86_64, or use format="ncnn" instead |
-| Model export is very slow | PNNX/NCNN compilation is CPU-intensive | Export once, reuse the NCNN model directory |
-| OOM (Out of Memory) during inference | YOLO26m/l/x too large for 4GB Pi | Use YOLO26n, reduce `imgsz`, or get 8GB model |
-| Camera not detected | CSI connector mismatch or disabled | `sudo raspi-config` → Interface Options → Camera → Enable |
-| Poor FPS | Using PyTorch format (slowest) | Export to NCNN or OpenVINO |
-| `libedgetpu` fails to load | Outdated runtime | Use community-maintained runtime from feranick/libertpu |
-| High memory usage | OpenCV GUI + model + camera buffer | Use `model.predict()` without `plot()` |
-| Swap file too small | 1GB Pi runs out of RAM | Increase swap to 2GB+ |
+| Problem                               | Cause                                           | Solution                                                                 |
+| ------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------ |
+| `pip install` fails on aarch64        | Missing wheels for some packages                | Use `--extra-index-url https://download.pytorch.org/whl/cpu`             |
+| TFLite NMS export fails               | ONNX NMS opset not supported on aarch64         | Export on x86_64, or use format="ncnn" instead                           |
+| Model export is very slow             | PNNX/NCNN compilation is CPU-intensive          | Export once, reuse the NCNN model directory                              |
+| OOM (Out of Memory) during inference  | YOLO26m/l/x too large for 4GB Pi                | Use YOLO26n, reduce `imgsz`, or get 8GB model                            |
+| Camera not detected                   | CSI connector mismatch or disabled              | `sudo raspi-config` → Interface Options → Camera → Enable                |
+| Poor FPS                              | Using PyTorch format (slowest)                  | Export to NCNN or OpenVINO                                               |
+| `libedgetpu` fails to load            | Outdated runtime                                | Use community-maintained runtime from feranick/libertpu                  |
+| High memory usage                     | OpenCV GUI + model + camera buffer              | Use `model.predict()` without `plot()`                                   |
+| Swap file too small                   | 1GB Pi runs out of RAM                          | Increase swap to 2GB+                                                    |
 | `UnicodeEncodeError` with Ultralytics | Pi OS locale is ISO-8859-15, can't encode emoji | Set `export PYTHONIOENCODING=utf-8 LC_ALL=C.UTF-8` before running Python |
 
 ---
@@ -416,7 +437,7 @@ yolo export model=yolo26n.pt format=ncnn
 yolo predict model='yolo26n_ncnn_model' source='https://ultralytics.com/images/bus.jpg'
 
 # === WITH CAMERA ===
-pip install picamera2   # Pre-installed on Pi OS
+pip install picamera2 # Pre-installed on Pi OS
 python -c "
 from ultralytics import YOLO
 from picamera2 import Picamera2
@@ -435,30 +456,31 @@ cv2.destroyAllWindows()
 ```
 
 ### Expected FPS on Pi 4 (estimated):
-| Setup | YOLO26n | YOLO26s |
-|-------|:-------:|:-------:|
-| PyTorch format | ~2.5 FPS | ~1 FPS |
-| ONNX format | ~5.5 FPS | ~2 FPS |
-| NCNN format | **~10 FPS** | ~4 FPS |
-| OpenVINO format | ~9.5 FPS | ~5 FPS |
+
+| Setup            |   YOLO26n   |   YOLO26s   |
+| ---------------- | :---------: | :---------: |
+| PyTorch format   |  ~2.5 FPS   |   ~1 FPS    |
+| ONNX format      |  ~5.5 FPS   |   ~2 FPS    |
+| NCNN format      | **~10 FPS** |   ~4 FPS    |
+| OpenVINO format  |  ~9.5 FPS   |   ~5 FPS    |
 | Edge TPU (320px) | **~30 FPS** | **~25 FPS** |
 
 ---
 
 ## 13. References & Further Reading
 
-| Resource | URL |
-|----------|-----|
-| Official Pi Guide | `docs/en/guides/raspberry-pi.md` |
+| Resource             | URL                                                |
+| -------------------- | -------------------------------------------------- |
+| Official Pi Guide    | `docs/en/guides/raspberry-pi.md`                   |
 | Edge TPU on Pi Guide | `docs/en/guides/coral-edge-tpu-on-raspberry-pi.md` |
-| NCNN Integration | `docs/en/integrations/ncnn.md` |
-| TFLite Integration | `docs/en/integrations/tflite.md` |
-| MNN Integration | `docs/en/integrations/mnn.md` |
-| OpenVINO on ARM | `docs/en/integrations/openvino.md` |
-| Export Options | `docs/en/guides/model-deployment-options.md` |
-| Full Documentation | https://docs.ultralytics.com |
-| GitHub Repository | https://github.com/ultralytics/ultralytics |
-| Raspberry Pi Docs | https://www.raspberrypi.com/documentation/ |
+| NCNN Integration     | `docs/en/integrations/ncnn.md`                     |
+| TFLite Integration   | `docs/en/integrations/tflite.md`                   |
+| MNN Integration      | `docs/en/integrations/mnn.md`                      |
+| OpenVINO on ARM      | `docs/en/integrations/openvino.md`                 |
+| Export Options       | `docs/en/guides/model-deployment-options.md`       |
+| Full Documentation   | https://docs.ultralytics.com                       |
+| GitHub Repository    | https://github.com/ultralytics/ultralytics         |
+| Raspberry Pi Docs    | https://www.raspberrypi.com/documentation/         |
 
 ---
 
@@ -473,7 +495,7 @@ sudo sh get-docker.sh
 
 # Add your user to the docker group (avoid sudo on every command)
 sudo usermod -aG docker $USER
-newgrp docker  # or log out and back in
+newgrp docker # or log out and back in
 
 # Verify
 docker --version
@@ -524,23 +546,29 @@ docker start ultralytics-pi
 ### 14.4 Connecting to the Running Container
 
 **Option A — Interactive shell (most common):**
+
 ```bash
 docker exec -it ultralytics-pi bash
 ```
+
 You get a bash shell inside the container. Type `exit` to leave (container keeps running).
 
 **Option B — Run a single command without entering:**
+
 ```bash
 docker exec -it ultralytics-pi yolo predict model=yolo26n.pt source=workspace/test.jpg
 ```
 
 **Option C — Attach to container's console:**
+
 ```bash
 docker attach ultralytics-pi
 ```
+
 (Only use if the container was started with `-it` and is running an interactive process. Detach with `Ctrl+P Ctrl+Q`.)
 
 **Option D — If container exits and you want a fresh shell:**
+
 ```bash
 docker start -ai ultralytics-pi
 ```
@@ -548,9 +576,9 @@ docker start -ai ultralytics-pi
 ### 14.5 Stopping and Restarting
 
 ```bash
-docker stop ultralytics-pi       # Graceful stop
-docker restart ultralytics-pi    # Restart
-docker rm ultralytics-pi         # Remove container entirely (data in -v volume persists)
+docker stop ultralytics-pi    # Graceful stop
+docker restart ultralytics-pi # Restart
+docker rm ultralytics-pi      # Remove container entirely (data in -v volume persists)
 ```
 
 ### 14.6 One-liner for Quick Interactive Use (No Named Container)
@@ -560,6 +588,7 @@ If you just want a quick session without persistence:
 ```bash
 docker run -it --rm --ipc=host ultralytics/ultralytics:latest-arm64
 ```
+
 (`--rm` auto-deletes the container when you exit — all data is lost.)
 
 ---
@@ -577,7 +606,7 @@ The `Dockerfile-arm64` runs `pip install -e ".[export]"`, which installs **all**
 docker exec -it ultralytics-pi bash
 
 # 2. You're now inside. The container has yolo26n.pt pre-downloaded.
-ls -la yolo26n.pt  # Should exist
+ls -la yolo26n.pt # Should exist
 
 # 3. Export to NCNN (this uses PNNX under the hood)
 yolo export model=yolo26n.pt format=ncnn imgsz=640
@@ -593,6 +622,7 @@ yolo predict model=yolo26n_ncnn_model source='https://ultralytics.com/images/bus
 ### 15.3 What Happens During NCNN Export
 
 The export pipeline is:
+
 ```
 yolo26n.pt (PyTorch)
     → torch.onnx.export() → yolo26n.onnx (intermediate)
@@ -621,9 +651,9 @@ The NCNN output directory contains:
 
 ```bash
 # Inside the container, all these work:
-yolo export model=yolo26n.pt format=onnx        # ~2-5 min
-yolo export model=yolo26n.pt format=openvino    # ~2-5 min
-yolo export model=yolo26n.pt format=mnn         # Requires MNN tools
+yolo export model=yolo26n.pt format=onnx     # ~2-5 min
+yolo export model=yolo26n.pt format=openvino # ~2-5 min
+yolo export model=yolo26n.pt format=mnn      # Requires MNN tools
 ```
 
 ---
@@ -659,6 +689,7 @@ Inside the container, YOLO writes to:
 | `yolo26n_ncnn_model/metadata.yaml` | NCNN model metadata (task, names, imgsz) |
 
 To persist logs, mount a volume or copy results out:
+
 ```bash
 # From host, copy results out of container
 docker cp ultralytics-pi:/ultralytics/runs/detect/predict ./results
@@ -668,23 +699,23 @@ docker run -d --name ultralytics-pi \
   --restart unless-stopped \
   --ipc=host \
   -v /home/pi/ultralytics-data:/ultralytics/workspace \
-  -v /home/pi/ultralytics-runs:/ultralytics/runs \   # Persist ALL runs
-  ultralytics/ultralytics:latest-arm64 \
+  -v /home/pi/ultralytics-runs:/ultralytics/runs \  # Persist ALL runs
+ultralytics/ultralytics:latest-arm64 \
   tail -f /dev/null
 ```
 
 ### 16.3 Debugging Common Docker Issues
 
-| Problem | Check / Fix |
-|---------|-------------|
-| Container exits immediately after start | Wrong entrypoint. Use `tail -f /dev/null` as the command |
-| Can't pull the image | Check internet: `ping google.com`. Check ARM64: `uname -m` |
-| Permission denied: `/var/run/docker.sock` | Add user to docker group: `sudo usermod -aG docker $USER` |
-| OOM inside container | Check with `docker stats ultralytics-pi`. Add `--memory=4g` flag |
-| Camera not accessible in container | Need `--device /dev/video0:/dev/video0` or `--privileged` flag |
-| NCNN export fails silently | Run with more verbosity: `yolo export model=yolo26n.pt format=ncnn verbose=True` |
-| Docker daemon not running after reboot | `sudo systemctl enable docker && sudo systemctl start docker` |
-| "Cannot connect to the Docker daemon" | `sudo dockerd &` or check `sudo systemctl status docker` |
+| Problem                                   | Check / Fix                                                                      |
+| ----------------------------------------- | -------------------------------------------------------------------------------- |
+| Container exits immediately after start   | Wrong entrypoint. Use `tail -f /dev/null` as the command                         |
+| Can't pull the image                      | Check internet: `ping google.com`. Check ARM64: `uname -m`                       |
+| Permission denied: `/var/run/docker.sock` | Add user to docker group: `sudo usermod -aG docker $USER`                        |
+| OOM inside container                      | Check with `docker stats ultralytics-pi`. Add `--memory=4g` flag                 |
+| Camera not accessible in container        | Need `--device /dev/video0:/dev/video0` or `--privileged` flag                   |
+| NCNN export fails silently                | Run with more verbosity: `yolo export model=yolo26n.pt format=ncnn verbose=True` |
+| Docker daemon not running after reboot    | `sudo systemctl enable docker && sudo systemctl start docker`                    |
+| "Cannot connect to the Docker daemon"     | `sudo dockerd &` or check `sudo systemctl status docker`                         |
 
 ### 16.4 Checking Resource Usage
 
@@ -732,13 +763,15 @@ hostname -I
 ```
 
 **Connecting:**
+
 - **Windows/Mac/Linux:** Install [RealVNC Viewer](https://www.realvnc.com/en/connect/download/viewer/) and connect to `192.168.1.100:5900` (or whatever your Pi's IP is)
 - **Linux alternative:** `vncviewer 192.168.1.100`
 
 **If using Raspberry Pi OS Lite (no desktop):** Install a lightweight desktop + VNC:
+
 ```bash
 sudo apt install raspberrypi-ui-mods x11vnc -y
-x11vnc -storepasswd  # Set a password
+x11vnc -storepasswd # Set a password
 x11vnc -forever -usepw -display :0 &
 ```
 
@@ -822,6 +855,7 @@ The `cv2.imshow()` window renders to the Pi's display, which is accessible remot
 If you prefer a browser-based UI instead of VNC:
 
 **Option A — Streamlit Dashboard (included in `ultralytics[solutions]`):**
+
 ```bash
 # Install streamlit
 docker exec ultralytics-pi pip install streamlit
@@ -832,38 +866,43 @@ docker exec -it ultralytics-pi yolo streamlit-predict model=yolo26n_ncnn_model
 ```
 
 **Option B — Flask Web Server:**
+
 ```python
 # Save this as webcam.py and run inside container
-from ultralytics import YOLO
 import cv2
-from flask import Flask, Response, render_template_string
+from flask import Flask, Response
 from picamera2 import Picamera2
 
+from ultralytics import YOLO
+
 app = Flask(__name__)
-model = YOLO('yolo26n_ncnn_model')
+model = YOLO("yolo26n_ncnn_model")
 picam2 = Picamera2()
-picam2.configure('preview')
+picam2.configure("preview")
 picam2.start()
+
 
 def generate():
     while True:
         frame = picam2.capture_array()
         results = model(frame, imgsz=320)
         annotated = results[0].plot()
-        _, jpeg = cv2.imencode('.jpg', annotated)
-        yield (b'--frame\r\n'
-               b'Content-Type: image/jpeg\r\n\r\n' + jpeg.tobytes() + b'\r\n')
+        _, jpeg = cv2.imencode(".jpg", annotated)
+        yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpeg.tobytes() + b"\r\n")
 
-@app.route('/video_feed')
+
+@app.route("/video_feed")
 def video_feed():
-    return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    return Response(generate(), mimetype="multipart/x-mixed-replace; boundary=frame")
 
-@app.route('/')
+
+@app.route("/")
 def index():
     return '<html><body><img src="/video_feed"></body></html>'
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
 ```
 
 Access at `http://192.168.1.100:5000` from any browser on your local network.
@@ -905,14 +944,14 @@ rpicam-hello -t 5000
 
 ### 18.4 Camera Hardware Info (v2)
 
-| Property | Value |
-|----------|-------|
-| Sensor | Sony IMX219 |
-| Resolution | 3280 × 2464 (8 MP) |
-| Focus | Fixed |
-| FOV | 62.2° × 48.8° |
-| Connection | 22-pin ribbon cable to CSI |
-| Driver | `libcamera` stack (native on Bookworm) |
+| Property   | Value                                  |
+| ---------- | -------------------------------------- |
+| Sensor     | Sony IMX219                            |
+| Resolution | 3280 × 2464 (8 MP)                     |
+| Focus      | Fixed                                  |
+| FOV        | 62.2° × 48.8°                          |
+| Connection | 22-pin ribbon cable to CSI             |
+| Driver     | `libcamera` stack (native on Bookworm) |
 
 ### 18.5 Using picamera2 in Python
 
@@ -925,9 +964,7 @@ from picamera2 import Picamera2
 picam2 = Picamera2()
 
 # Configure preview mode (lower res for faster inference)
-config = picam2.create_preview_configuration(
-    main={"size": (640, 480), "format": "RGB888"}
-)
+config = picam2.create_preview_configuration(main={"size": (640, 480), "format": "RGB888"})
 picam2.configure(config)
 picam2.start()
 
@@ -936,11 +973,10 @@ frame = picam2.capture_array()  # shape: (480, 640, 3), dtype: uint8
 ```
 
 **Camera Configuration Options:**
+
 ```python
 # High quality (slower, good for stills)
-config = picam2.create_still_configuration(
-    main={"size": (3280, 2464), "format": "RGB888"}
-)
+config = picam2.create_still_configuration(main={"size": (3280, 2464), "format": "RGB888"})
 
 # Low latency (faster, good for real-time)
 config = picam2.create_preview_configuration(
@@ -988,14 +1024,14 @@ docker run -d --name ultralytics-picam \
 
 ### 18.7 Camera Troubleshooting
 
-| Problem | Check / Fix |
-|---------|-------------|
-| `picamera2` not found | Install: `pip install picamera2` (should be pre-installed on Pi OS) |
-| `rpicam-hello` fails | Ensure camera is enabled: `sudo raspi-config` → Interface |
-| "Failed to open camera" | Check ribbon cable connection; try re-seating |
-| No `/dev/video*` devices | Camera not enabled in config.txt: `sudo raspi-config` |
-| Black/missing frames | Wrong format string. Use `"RGB888"` not `"BGR888"` |
-| `--device /dev/video0` still fails | Try `--privileged` flag or `-v /dev:/dev` |
+| Problem                            | Check / Fix                                                         |
+| ---------------------------------- | ------------------------------------------------------------------- |
+| `picamera2` not found              | Install: `pip install picamera2` (should be pre-installed on Pi OS) |
+| `rpicam-hello` fails               | Ensure camera is enabled: `sudo raspi-config` → Interface           |
+| "Failed to open camera"            | Check ribbon cable connection; try re-seating                       |
+| No `/dev/video*` devices           | Camera not enabled in config.txt: `sudo raspi-config`               |
+| Black/missing frames               | Wrong format string. Use `"RGB888"` not `"BGR888"`                  |
+| `--device /dev/video0` still fails | Try `--privileged` flag or `-v /dev:/dev`                           |
 
 ---
 
@@ -1078,6 +1114,7 @@ docker restart ultralytics-pi
 **Goal:** Deploy YOLO inference inside Docker on a Pi 4 with Camera v2, auto-starting on every reboot with zero manual intervention.
 
 **Architecture:**
+
 ```
 [Boot] → systemd → Docker daemon → ultralytics container → inference script → camera→results
 ```
@@ -1091,7 +1128,7 @@ Run this once on the Pi. It installs Docker, pulls the image, exports the NCNN m
 set -euo pipefail
 
 # ── 1. Install Docker ──
-if ! command -v docker &>/dev/null; then
+if ! command -v docker &> /dev/null; then
   curl -fsSL https://get.docker.com | sh
   sudo usermod -aG docker "$USER"
   echo "=== Log out and back in, then re-run this script ==="
@@ -1177,7 +1214,7 @@ WantedBy=multi-user.target
 SVC
 
 # ── 6. Create and start the persistent container ──
-docker rm -f ultralytics-pi-cam 2>/dev/null || true
+docker rm -f ultralytics-pi-cam 2> /dev/null || true
 docker run -d \
   --name ultralytics-pi-cam \
   --restart no \
@@ -1212,16 +1249,16 @@ sudo systemctl status ultralytics-docker.service --no-pager
 
 ### 20.4 Management Commands
 
-| Action | Command |
-|--------|---------|
-| View service status | `sudo systemctl status ultralytics-docker.service` |
-| View live logs | `sudo journalctl -fu ultralytics-docker.service` |
-| Stop inference | `sudo systemctl stop ultralytics-docker.service` |
-| Start inference | `sudo systemctl start ultralytics-docker.service` |
-| Disable auto-start | `sudo systemctl disable ultralytics-docker.service` |
+| Action              | Command                                               |
+| ------------------- | ----------------------------------------------------- |
+| View service status | `sudo systemctl status ultralytics-docker.service`    |
+| View live logs      | `sudo journalctl -fu ultralytics-docker.service`      |
+| Stop inference      | `sudo systemctl stop ultralytics-docker.service`      |
+| Start inference     | `sudo systemctl start ultralytics-docker.service`     |
+| Disable auto-start  | `sudo systemctl disable ultralytics-docker.service`   |
 | Tail detection logs | `tail -f ~/ultralytics-data/results/detections.jsonl` |
-| Enter container | `docker exec -it ultralytics-pi-cam bash` |
-| View container logs | `docker logs ultralytics-pi-cam` |
+| Enter container     | `docker exec -it ultralytics-pi-cam bash`             |
+| View container logs | `docker logs ultralytics-pi-cam`                      |
 
 ### 20.5 Camera Device Mapping
 
@@ -1229,19 +1266,21 @@ The `team1` script **dynamically discovers** available video devices at containe
 
 ```bash
 # The team1 script does this automatically:
-VIDEO_DEVICES=$(ls /dev/video* 2>/dev/null || true)
+VIDEO_DEVICES=$(ls /dev/video* 2> /dev/null || true)
 for dev in ${VIDEO_DEVICES}; do
-    DEVICE_FLAGS="${DEVICE_FLAGS} --device ${dev}:${dev}"
+  DEVICE_FLAGS="${DEVICE_FLAGS} --device ${dev}:${dev}"
 done
 ```
 
 If your camera doesn't appear, verify it is enabled:
+
 ```bash
 ls -l /dev/video*
-sudo raspi-config   → Interface Options → Camera → Enable → Reboot
+sudo raspi-config → Interface Options → Camera → Enable → Reboot
 ```
 
 Expected nodes on Raspberry Pi OS Bookworm:
+
 ```bash
 # crw-rw---- 1 root video 81, 0 ... /dev/video0  (main)
 # crw-rw---- 1 root video 81, 1 ... /dev/video1  (metadata)
@@ -1251,7 +1290,7 @@ Expected nodes on Raspberry Pi OS Bookworm:
 
 ### 20.6 Camera Usage & Image Capture
 
-This section covers how Team 1 users interact with the camera, capture images manually, view detection results, and configure camera behaviour.
+This section covers how Team 1 users interact with the camera, capture images manually, view detection results, and configure camera behavior.
 
 #### 20.6.1 Verify Camera Inside Container
 
@@ -1300,6 +1339,7 @@ print('Snapshot saved to /ultralytics/data/snapshot.jpg')
 ```
 
 View it on the host:
+
 ```bash
 ls -l ~/ultralytics/data/snapshot.jpg
 ```
@@ -1316,17 +1356,19 @@ Camera (picamera2) → capture_array() → YOLO inference → detections found?
 
 **What gets saved when a detection occurs:**
 
-| File | Location | Example |
-|------|----------|---------|
-| Annotated image | `/ultralytics/data/detect_{TS}.jpg` | `detect_20260101_120000.jpg` |
-| Detection log | `/ultralytics/data/detections.jsonl` | `{"timestamp":"...", "detections":2, ...}` |
+| File            | Location                             | Example                                    |
+| --------------- | ------------------------------------ | ------------------------------------------ |
+| Annotated image | `/ultralytics/data/detect_{TS}.jpg`  | `detect_20260101_120000.jpg`               |
+| Detection log   | `/ultralytics/data/detections.jsonl` | `{"timestamp":"...", "detections":2, ...}` |
 
 **What does NOT get saved:**
+
 - Frames with no detections (zero disk waste)
 - Raw (unannotated) frames
 - Video files
 
 Each log line in `detections.jsonl` contains:
+
 ```json
 {
   "timestamp": "20260101_120000",
@@ -1341,12 +1383,12 @@ Each log line in `detections.jsonl` contains:
 
 The inference script respects these environment variables (set them before starting the service):
 
-| Parameter | Default | Env Variable | Effect |
-|-----------|---------|-------------|--------|
-| Inference image size | 320 | `IMGSZ` | Lower = faster but less accurate |
-| Confidence threshold | 0.25 | `CONF_THRESH` | Raise to reduce false positives |
-| IoU threshold | 0.45 | `IOU_THRESH` | Raise for more overlapping boxes |
-| Frame skip | 1 | `FRAME_SKIP` | 2 = process every other frame |
+| Parameter            | Default | Env Variable  | Effect                           |
+| -------------------- | ------- | ------------- | -------------------------------- |
+| Inference image size | 320     | `IMGSZ`       | Lower = faster but less accurate |
+| Confidence threshold | 0.25    | `CONF_THRESH` | Raise to reduce false positives  |
+| IoU threshold        | 0.45    | `IOU_THRESH`  | Raise for more overlapping boxes |
+| Frame skip           | 1       | `FRAME_SKIP`  | 2 = process every other frame    |
 
 **Example — run with higher confidence to reduce false alarms:**
 
@@ -1379,6 +1421,7 @@ A lightweight web server (Python stdlib, no Flask needed) serves all saved detec
 Open a browser on any device on the same network and go to `http://<pi-ip>:5000`.
 
 **Features:**
+
 - Shows all saved `detect_*.jpg` images in a **10-column grid**, newest first
 - Auto-refreshes every 10 seconds
 - Click any image for full-size view with **← Back to Gallery**, **< Prev** / **Next >** navigation links and **Escape** / **←** / **→** arrow key support
@@ -1401,12 +1444,14 @@ The gallery will now start automatically whenever the inference service starts.
 #### 20.6.6 Alternative Ways to View Images
 
 **Via scp (no browser needed):**
+
 ```bash
 # From your laptop
-scp slaan1974@<pi-ip>:~/ultralytics/data/detect_*.jpg .
+scp slaan1974@ . < pi-ip > :~/ultralytics/data/detect_*.jpg
 ```
 
 **Via VNC (graphical desktop):**
+
 ```bash
 # On the Pi (if using Pi OS with desktop)
 sudo systemctl enable vncserver
@@ -1415,11 +1460,13 @@ sudo systemctl start vncserver
 ```
 
 **Via docker cp:**
+
 ```bash
 docker cp ultralytics-pi-cam:/ultralytics/data/detect_20260101_120000.jpg .
 ```
 
 **Monitor live log stream:**
+
 ```bash
 ./team1 logs
 # Shows: "SAVED /ultralytics/data/detect_20260101_120000.jpg  (2 person, dog)"
@@ -1427,42 +1474,42 @@ docker cp ultralytics-pi-cam:/ultralytics/data/detect_20260101_120000.jpg .
 
 #### 20.6.7 Camera Troubleshooting (Docker-Specific)
 
-| Problem | Likely Cause | Check / Fix |
-|---------|-------------|-------------|
-| `No /dev/video*` devices | Camera not enabled in config | `sudo raspi-config` → Interface → Camera → Enable → Reboot |
-| `Device not found` on container start | Missing `--device` flag | Re-run `./team1` (dynamically maps all video nodes) |
-| `Picamera2` not available | Ubuntu container lacks libcamera | Not required — inference script falls back to OpenCV V4L2 automatically |
-| Black or green captured frames | Wrong pixel format | Ensure format is `"RGB888"`, not `"BGR888"` or `"YUYV"` |
-| Camera works but no detections saved | Threshold too high or nothing in frame | Lower `CONF_THRESH` (e.g. 0.1) temporarily to test; point camera at a person or object |
-| Camera works but detections are wrong | Wrong model or poor lighting | Use `yolo26n.pt`; add more light or use `imgsz=640` |
-| Inference is very slow (>1s per frame) | CPU throttling or wrong export format | Verify NCNN model is loaded (not PyTorch); check `sudo raspi-config` → Performance → GPU |
-| Web gallery not loading in browser | Port blocked or container not sharing network | Container uses `--net=host`; try `curl http://localhost:5000` on the Pi |
-| Container keeps restarting | OOM or Python crash | `docker logs ultralytics-pi-cam` to see crash reason; check `free -h` for memory |
-| `libcamera` errors about camera not found | Camera ribbon cable loose | Re-seat the camera cable; run `rpicam-hello -t 2000` on the Pi (not in container) |
-| Permission denied on `/dev/video*` inside container | `--device` flag missing | Re-run `./team1` to recreate container with correct device mapping |
+| Problem                                             | Likely Cause                                  | Check / Fix                                                                              |
+| --------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `No /dev/video*` devices                            | Camera not enabled in config                  | `sudo raspi-config` → Interface → Camera → Enable → Reboot                               |
+| `Device not found` on container start               | Missing `--device` flag                       | Re-run `./team1` (dynamically maps all video nodes)                                      |
+| `Picamera2` not available                           | Ubuntu container lacks libcamera              | Not required — inference script falls back to OpenCV V4L2 automatically                  |
+| Black or green captured frames                      | Wrong pixel format                            | Ensure format is `"RGB888"`, not `"BGR888"` or `"YUYV"`                                  |
+| Camera works but no detections saved                | Threshold too high or nothing in frame        | Lower `CONF_THRESH` (e.g. 0.1) temporarily to test; point camera at a person or object   |
+| Camera works but detections are wrong               | Wrong model or poor lighting                  | Use `yolo26n.pt`; add more light or use `imgsz=640`                                      |
+| Inference is very slow (>1s per frame)              | CPU throttling or wrong export format         | Verify NCNN model is loaded (not PyTorch); check `sudo raspi-config` → Performance → GPU |
+| Web gallery not loading in browser                  | Port blocked or container not sharing network | Container uses `--net=host`; try `curl http://localhost:5000` on the Pi                  |
+| Container keeps restarting                          | OOM or Python crash                           | `docker logs ultralytics-pi-cam` to see crash reason; check `free -h` for memory         |
+| `libcamera` errors about camera not found           | Camera ribbon cable loose                     | Re-seat the camera cable; run `rpicam-hello -t 2000` on the Pi (not in container)        |
+| Permission denied on `/dev/video*` inside container | `--device` flag missing                       | Re-run `./team1` to recreate container with correct device mapping                       |
 
 ### 20.7 Diagnostics: `support` Script
 
 ```bash
-./support              # Full diagnostics (system, camera, docker, service, model, results, network)
-./support quick        # Quick overview
-./support camera       # Detailed camera test (V4L2 capture inside container)
-./support docker       # Docker-specific diagnostics (image, container, daemon)
-./support logs         # Show recent service + container + detection logs
-./support fix          # Suggest fixes for any detected issues
+./support        # Full diagnostics (system, camera, docker, service, model, results, network)
+./support quick  # Quick overview
+./support camera # Detailed camera test (V4L2 capture inside container)
+./support docker # Docker-specific diagnostics (image, container, daemon)
+./support logs   # Show recent service + container + detection logs
+./support fix    # Suggest fixes for any detected issues
 ```
 
 **Commands:**
 
-| Command | Description |
-|---------|-------------|
-| `./support` (or `./support all`) | Full diagnostics — runs all checks and prints a summary |
-| `./support quick` | Quick system/service/camera/results overview (no detailed checks) |
-| `./support camera` | Detailed camera diagnostics — checks video devices, V4L2 access inside container, and attempts a test capture |
-| `./support docker` | Docker-specific checks — daemon status, image pulled, container running, resource usage |
-| `./support logs` | Show last 30 lines of service journal + last 20 lines of container logs + last 5 detection entries |
-| `./support fix` | Interactive fix suggestions — checks for common issues and prints step-by-step fix commands |
-| `./support --help` | Show usage and all available commands |
+| Command                          | Description                                                                                                   |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `./support` (or `./support all`) | Full diagnostics — runs all checks and prints a summary                                                       |
+| `./support quick`                | Quick system/service/camera/results overview (no detailed checks)                                             |
+| `./support camera`               | Detailed camera diagnostics — checks video devices, V4L2 access inside container, and attempts a test capture |
+| `./support docker`               | Docker-specific checks — daemon status, image pulled, container running, resource usage                       |
+| `./support logs`                 | Show last 30 lines of service journal + last 20 lines of container logs + last 5 detection entries            |
+| `./support fix`                  | Interactive fix suggestions — checks for common issues and prints step-by-step fix commands                   |
+| `./support --help`               | Show usage and all available commands                                                                         |
 
 ---
 
@@ -1473,6 +1520,7 @@ docker cp ultralytics-pi-cam:/ultralytics/data/detect_20260101_120000.jpg .
 **Goal:** Deploy YOLO inference natively on the Pi 4 OS (no Docker) with Camera v2, auto-starting on every reboot.
 
 **Architecture:**
+
 ```
 [Boot] → systemd → ultralytics-local.service → inference script → camera→results
 ```
@@ -1482,24 +1530,24 @@ docker cp ultralytics-pi-cam:/ultralytics/data/detect_20260101_120000.jpg .
 A single executable script `team2` handles the entire lifecycle. Copy it to the Pi and run:
 
 ```bash
-./team2    # Full setup: installs system deps, creates venv, exports NCNN model,
-           # creates inference script, installs and starts systemd service
+./team2 # Full setup: installs system deps, creates venv, exports NCNN model,
+# creates inference script, installs and starts systemd service
 ```
 
 **Commands:**
 
-| Command | Description | Time |
-|---------|-------------|:----:|
-| `./team2` (or `./team2 setup`) | Full installation — run once on first deployment | ~30 min |
-| `./team2 setup --force` | Full installation, redo all steps (ignore cached state) | ~30 min |
-| `./team2 update` | **Fast re-write** — re-creates scripts and restarts services after editing `team2` | **~2 sec** |
-| `./team2 status` | Show inference service + gallery service, model, results, and camera status | ~2 sec |
-| `./team2 logs` | Follow live inference log (`journalctl -fu`) | — |
-| `./team2 snapshot` | Capture test frame via `rpicam-jpeg` (works over SSH) | ~3 sec |
-| `./team2 camera-test` | Validate camera hardware via `rpicam-hello --nopreview` | ~3 sec |
-| `./team2 gallery` | Start web gallery on port 5000 (Python stdlib) | — |
-| `./team2 stop` / `start` / `restart` | Manage *both* inference + gallery services | ~2 sec |
-| `./team2 --help` | Show usage and all available commands | — |
+| Command                              | Description                                                                        |    Time    |
+| ------------------------------------ | ---------------------------------------------------------------------------------- | :--------: |
+| `./team2` (or `./team2 setup`)       | Full installation — run once on first deployment                                   |  ~30 min   |
+| `./team2 setup --force`              | Full installation, redo all steps (ignore cached state)                            |  ~30 min   |
+| `./team2 update`                     | **Fast re-write** — re-creates scripts and restarts services after editing `team2` | **~2 sec** |
+| `./team2 status`                     | Show inference service + gallery service, model, results, and camera status        |   ~2 sec   |
+| `./team2 logs`                       | Follow live inference log (`journalctl -fu`)                                       |     —      |
+| `./team2 snapshot`                   | Capture test frame via `rpicam-jpeg` (works over SSH)                              |   ~3 sec   |
+| `./team2 camera-test`                | Validate camera hardware via `rpicam-hello --nopreview`                            |   ~3 sec   |
+| `./team2 gallery`                    | Start web gallery on port 5000 (Python stdlib)                                     |     —      |
+| `./team2 stop` / `start` / `restart` | Manage _both_ inference + gallery services                                         |   ~2 sec   |
+| `./team2 --help`                     | Show usage and all available commands                                              |     —      |
 
 **After editing `team2`** (e.g., changing `FRAME_SKIP`, gallery CSS, etc.), run `./team2 update` instead of re-running full setup. It only re-writes the embedded scripts to disk and restarts the services — no apt, no pip, no model export. Takes ~2 seconds.
 
@@ -1508,12 +1556,12 @@ The gallery service (`ultralytics-gallery.service`) is created and enabled durin
 ### 21.3 Diagnostics: `support2` Script
 
 ```bash
-./support2           # Full diagnostics (system, camera, service, model, results, network)
-./support2 quick     # Quick overview
-./support2 camera    # Detailed camera test (rpicam-jpeg capture)
-./support2 logs      # Show recent service + detection logs
-./support2 fix       # Suggest fixes for any detected issues
-./support2 --help    # Show usage and all available commands
+./support2        # Full diagnostics (system, camera, service, model, results, network)
+./support2 quick  # Quick overview
+./support2 camera # Detailed camera test (rpicam-jpeg capture)
+./support2 logs   # Show recent service + detection logs
+./support2 fix    # Suggest fixes for any detected issues
+./support2 --help # Show usage and all available commands
 ```
 
 ### 21.4 What Happens After Reboot
@@ -1521,7 +1569,7 @@ The gallery service (`ultralytics-gallery.service`) is created and enabled durin
 1. `systemd` starts `ultralytics-local.service` (inference) and `ultralytics-gallery.service` (web gallery) after network is online
 2. Inference service launches inference script via venv Python
 3. Gallery service launches `web_gallery.py` on port 5000
-4. Inference script initialises camera (picamera2 — native, libcamera available) and loads NCNN model
+4. Inference script initializes camera (picamera2 — native, libcamera available) and loads NCNN model
 5. Annotated frames saved to `~/ultralytics-local/results/` (only on detection)
 6. Detection logs written to `~/ultralytics-local/results/detections.jsonl`
 7. If a script crashes, `Restart=always` re-launches after the configured delay (10s inference, 5s gallery)
@@ -1564,14 +1612,14 @@ sudo systemctl start ultralytics-local.service
 
 The inference script reads these optional environment variables at startup:
 
-| Parameter | Default | Env Variable | Effect |
-|-----------|---------|-------------|--------|
-| Frame skip | 10 | `FRAME_SKIP` | Process every Nth frame (10 = ~3 inf/sec at 30fps) |
-| Latest interval | 15 | `LATEST_INTERVAL` | Save `latest.jpg` every Nth processed frame |
-| Confidence | 0.25 | `CONF_THRESH` | Raise to reduce false positives |
-| IoU threshold | 0.45 | `IOU_THRESH` | Raise for more overlapping boxes |
-| Image size | 320 | `IMGSZ` | Lower = faster but less accurate |
-| Max FIFO | 1000 | `MAX_FIFO` | Max detection images before oldest are deleted |
+| Parameter       | Default | Env Variable      | Effect                                             |
+| --------------- | ------- | ----------------- | -------------------------------------------------- |
+| Frame skip      | 10      | `FRAME_SKIP`      | Process every Nth frame (10 = ~3 inf/sec at 30fps) |
+| Latest interval | 15      | `LATEST_INTERVAL` | Save `latest.jpg` every Nth processed frame        |
+| Confidence      | 0.25    | `CONF_THRESH`     | Raise to reduce false positives                    |
+| IoU threshold   | 0.45    | `IOU_THRESH`      | Raise for more overlapping boxes                   |
+| Image size      | 320     | `IMGSZ`           | Lower = faster but less accurate                   |
+| Max FIFO        | 1000    | `MAX_FIFO`        | Max detection images before oldest are deleted     |
 
 **Override via systemd drop-in** (survives service restarts, no script edits):
 
@@ -1595,17 +1643,17 @@ FRAME_SKIP=5 ./team2
 
 ## 22. Team Comparison Summary
 
-| Aspect | Team 1 — Docker | Team 2 — Local |
-|--------|:---------------:|:--------------:|
-| Isolation | ✅ Full container isolation | ❌ Runs on host OS |
-| Setup time | ~5 min (pull image) | ~15 min (pip install) |
-| Disk usage | ~1.5 GB (image) | ~2 GB (venv + deps) |
-| Camera passthrough | `--device /dev/video*` | Direct (native) |
-| GPU access | VideoCore via NCNN inside container | VideoCore via NCNN natively |
-| Auto-start mechanism | systemd wrapper around docker exec | Direct systemd service |
-| Overhead | Negligible (native performance) | None |
-| Update strategy | `docker pull` new image | `pip install -U` in venv |
-| Best for | Teams wanting reproducibility & isolation | Teams wanting simplicity & direct hardware access |
+| Aspect               |              Team 1 — Docker              |                  Team 2 — Local                   |
+| -------------------- | :---------------------------------------: | :-----------------------------------------------: |
+| Isolation            |        ✅ Full container isolation        |                ❌ Runs on host OS                 |
+| Setup time           |            ~5 min (pull image)            |               ~15 min (pip install)               |
+| Disk usage           |              ~1.5 GB (image)              |                ~2 GB (venv + deps)                |
+| Camera passthrough   |          `--device /dev/video*`           |                  Direct (native)                  |
+| GPU access           |    VideoCore via NCNN inside container    |            VideoCore via NCNN natively            |
+| Auto-start mechanism |    systemd wrapper around docker exec     |              Direct systemd service               |
+| Overhead             |      Negligible (native performance)      |                       None                        |
+| Update strategy      |          `docker pull` new image          |             `pip install -U` in venv              |
+| Best for             | Teams wanting reproducibility & isolation | Teams wanting simplicity & direct hardware access |
 
 ---
 
@@ -1619,11 +1667,11 @@ FRAME_SKIP=5 ./team2
 
 **Fix applied 2026-06-22:**
 
-| File | Change |
-|------|--------|
+| File            | Change                                                                                                                                        |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `team1:501-508` | `create_container` — changed picamera2 uninstall from silently suppressed (`> /dev/null 2>&1`) to **visible output** with pass/fail messaging |
-| `team1:610-611` | `cmd_snapshot` — added `pip uninstall -y picamera2` before V4L2 capture so snapshot works even if picamera2 is still present |
-| `support:684` | `camera` diagnostic — replaced broken picamera2 test capture with same OpenCV V4L2 approach used by `./team1 snapshot` |
+| `team1:610-611` | `cmd_snapshot` — added `pip uninstall -y picamera2` before V4L2 capture so snapshot works even if picamera2 is still present                  |
+| `support:684`   | `camera` diagnostic — replaced broken picamera2 test capture with same OpenCV V4L2 approach used by `./team1 snapshot`                        |
 
 ### 23.2 How Camera Access Works Now
 
@@ -1645,9 +1693,9 @@ The `run_yolo.py` inference script at `team1:128-132` already had a proper `try/
 
 **Fix applied 2026-06-23:**
 
-| File | Change |
-|------|--------|
-| `team2:19-22` | Added `export PYTHONIOENCODING=utf-8` and `export LC_ALL=C.UTF-8` globally at script start, before any Python invocations |
+| File            | Change                                                                                                                                                                                                                    |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `team2:19-22`   | Added `export PYTHONIOENCODING=utf-8` and `export LC_ALL=C.UTF-8` globally at script start, before any Python invocations                                                                                                 |
 | `team2:170-197` | Rewrote `export_model` heredoc — replaced em dash `—` with `-` in `print()`; changed `src` path from `~/$name` to `os.getcwd()/$name` (Ultralytics saves to CWD, not home); added fallback search for the model directory |
 
 **Prevention:** The `PYTHONIOENCODING=utf-8` and `LC_ALL=C.UTF-8` exports force all Python subprocesses to use UTF-8 for stdout/stderr, avoiding encoding crashes regardless of the terminal's locale. These are set globally in `team2` so they apply to every Python call (install verification, export heredoc, inference script, gallery).
@@ -1662,11 +1710,11 @@ Additionally, `pip install picamera2` requires building `python-prctl` from sour
 
 **Fix applied 2026-06-23 (revised):**
 
-| File | Change |
-|------|--------|
-| `team2:102` | Added `libcap-dev` to the `apt install` list (build dependency for `python-prctl`) |
+| File            | Change                                                                                                                                            |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `team2:102`     | Added `libcap-dev` to the `apt install` list (build dependency for `python-prctl`)                                                                |
 | `team2:110-113` | Changed venv creation to `python3 -m venv --system-site-packages "${VENV_DIR}"` so the venv inherits system-installed `libcamera` and `picamera2` |
-| `team2:150-151` | **Removed** `pip install picamera2` — no longer needed since the system package is visible via `--system-site-packages` |
+| `team2:150-151` | **Removed** `pip install picamera2` — no longer needed since the system package is visible via `--system-site-packages`                           |
 
 **Why `--system-site-packages` is safe here:** The flag makes the venv fall back to system site-packages only for packages not installed in the venv. All critical ML packages (PyTorch, Ultralytics, numpy, etc.) are installed via `pip` inside the venv and take priority. `libcamera` and `picamera2` are the only system packages used, and they don't conflict with any pip-installed packages.
 
@@ -1677,38 +1725,38 @@ Additionally, `pip install picamera2` requires building `python-prctl` from sour
 ./team1 status
 
 # ── Common management ──
-./team1 logs          # Live inference log (Ctrl+C to exit)
-./team1 snapshot      # Test camera capture
-./team1 restart       # Restart service
-./team1 shell         # Enter container bash
+./team1 logs     # Live inference log (Ctrl+C to exit)
+./team1 snapshot # Test camera capture
+./team1 restart  # Restart service
+./team1 shell    # Enter container bash
 
 # ── If camera or inference fails ──
 docker exec ultralytics-pi-cam pip uninstall -y picamera2
 ./team1 restart
 
 # ── Run diagnostics ──
-./support             # Full diagnostics (all checks)
-./support quick       # Quick overview only
-./support camera      # Detailed camera diagnostics
-./support docker      # Docker-specific diagnostics
-./support logs        # Show log tails (service + container + detections)
-./support fix         # Suggested fixes
+./support        # Full diagnostics (all checks)
+./support quick  # Quick overview only
+./support camera # Detailed camera diagnostics
+./support docker # Docker-specific diagnostics
+./support logs   # Show log tails (service + container + detections)
+./support fix    # Suggested fixes
 
 # ── Team 2 management (local deployment) ──
-./team2 status        # Inference + gallery service status
-./team2 stop          # Stop both services
-./team2 start         # Start both services
-./team2 restart       # Restart both services
-./team2 logs          # Follow live inference log
-./team2 snapshot      # Capture test frame
-./team2 gallery       # Start gallery standalone (port 5000)
+./team2 status   # Inference + gallery service status
+./team2 stop     # Stop both services
+./team2 start    # Start both services
+./team2 restart  # Restart both services
+./team2 logs     # Follow live inference log
+./team2 snapshot # Capture test frame
+./team2 gallery  # Start gallery standalone (port 5000)
 
 # ── Team 2 diagnostics ──
-./support2            # Full diagnostics (all checks)
-./support2 quick      # Quick overview only
-./support2 camera     # Detailed camera diagnostics (rpicam-* tools)
-./support2 logs       # Show log tails (service + detections)
-./support2 fix        # Suggested fixes
+./support2        # Full diagnostics (all checks)
+./support2 quick  # Quick overview only
+./support2 camera # Detailed camera diagnostics (rpicam-* tools)
+./support2 logs   # Show log tails (service + detections)
+./support2 fix    # Suggested fixes
 ```
 
 ---
@@ -1719,13 +1767,13 @@ docker exec ultralytics-pi-cam pip uninstall -y picamera2
 
 Raspberry Pi OS Bookworm renamed the camera tools from `libcamera-*` to `rpicam-*`. These CLI tools are built on `libcamera` and work without a desktop environment (critical for headless/SSH setups).
 
-| Tool | Purpose | SSH-safe? |
-|------|---------|-----------|
-| `rpicam-hello` | Quick camera detection test | ✅ `--nopreview` |
-| `rpicam-jpeg` | Capture JPEG still images | ✅ `--nopreview` |
+| Tool           | Purpose                                  | SSH-safe?        |
+| -------------- | ---------------------------------------- | ---------------- |
+| `rpicam-hello` | Quick camera detection test              | ✅ `--nopreview` |
+| `rpicam-jpeg`  | Capture JPEG still images                | ✅ `--nopreview` |
 | `rpicam-still` | Advanced still capture (raspistill-like) | ✅ `--nopreview` |
-| `rpicam-vid` | Video recording (H.264) | ✅ `--nopreview` |
-| `rpicam-raw` | Raw Bayer frame capture | ✅ `--nopreview` |
+| `rpicam-vid`   | Video recording (H.264)                  | ✅ `--nopreview` |
+| `rpicam-raw`   | Raw Bayer frame capture                  | ✅ `--nopreview` |
 
 ### 24.2 Local Testing (on the Pi)
 
@@ -1751,18 +1799,18 @@ These methods let you verify the Pi's camera works **without a monitor** attache
 
 ```bash
 # From your laptop — capture frame and copy back in one step
-ssh pi@<pi-ip> "rpicam-jpeg --nopreview --timeout 2000 --width 640 --height 480 -o /tmp/pi_check.jpg"
-scp pi@<pi-ip>:/tmp/pi_check.jpg . && open pi_check.jpg
+ssh pi@ < pi-ip > "rpicam-jpeg --nopreview --timeout 2000 --width 640 --height 480 -o /tmp/pi_check.jpg"
+scp pi@ . < pi-ip > :/tmp/pi_check.jpg && open pi_check.jpg
 
 # Or one-liner: pipe JPEG directly to stdout
-ssh pi@<pi-ip> "rpicam-jpeg --nopreview --timeout 1500 --width 640 --height 480 -o -" > pi_check.jpg
+ssh pi@ < pi-ip > "rpicam-jpeg --nopreview --timeout 1500 --width 640 --height 480 -o -" > pi_check.jpg
 ```
 
 **Method B — SSH sensor info (no image needed):**
 
 ```bash
 # Get camera info without capturing an image
-ssh pi@<pi-ip> "rpicam-hello --nopreview --timeout 1000 --info-text 'Sensor: %sensor (%width x %height)' 2>&1"
+ssh pi@ < pi-ip > "rpicam-hello --nopreview --timeout 1000 --info-text 'Sensor: %sensor (%width x %height)' 2>&1"
 # Expected output: "Sensor: imx219 3280 x 2464" (or similar)
 ```
 
@@ -1770,34 +1818,34 @@ ssh pi@<pi-ip> "rpicam-hello --nopreview --timeout 1000 --info-text 'Sensor: %se
 
 ```bash
 # Check camera appears in /dev/video*
-ssh pi@<pi-ip> "ls -la /dev/video*"
+ssh pi@ < pi-ip > "ls -la /dev/video*"
 
 # Check camera is enabled in config
-ssh pi@<pi-ip> "grep -i 'camera\|start_x' /boot/config.txt 2>/dev/null || grep -i 'camera\|start_x' /boot/firmware/config.txt 2>/dev/null"
+ssh pi@ < pi-ip > "grep -i 'camera\|start_x' /boot/config.txt 2>/dev/null || grep -i 'camera\|start_x' /boot/firmware/config.txt 2>/dev/null"
 ```
 
 **Method D — Use `./team2 camera-test` (wraps rpicam-hello):**
 
 ```bash
-ssh pi@<pi-ip> "cd ~ && ./team2 camera-test"
+ssh pi@ < pi-ip > "cd ~ && ./team2 camera-test"
 # Returns: "Camera test PASSED — sensor detected and operational"
 ```
 
 **Method E — Use `./team2 snapshot` (captures JPEG):**
 
 ```bash
-ssh pi@<pi-ip> "cd ~ && ./team2 snapshot"
-scp pi@<pi-ip>:~/ultralytics-local/results/snapshot.jpg .
+ssh pi@ < pi-ip > "cd ~ && ./team2 snapshot"
+scp pi@ . < pi-ip > :~/ultralytics-local/results/snapshot.jpg
 ```
 
 ### 24.4 Troubleshooting Camera Issues Remotely
 
-| Symptom | Remote Check | Fix |
-|---------|-------------|-----|
-| No `/dev/video*` devices | `ssh pi@<pi-ip> "ls /dev/video*"` | `sudo raspi-config` → Interface → Camera → Enable → Reboot |
-| `rpicam-hello` exits with error | `ssh pi@<pi-ip> "rpicam-hello --nopreview --timeout 2000 2>&1"` | Check ribbon cable; re-seat it |
-| `picamera2` import fails | `ssh pi@<pi-ip> "python3 -c 'from picamera2 import Picamera2'"` | `sudo apt install python3-picamera2` |
-| YOLO service not running | `ssh pi@<pi-ip> "sudo systemctl status ultralytics-local.service"` | `ssh pi@<pi-ip> "./team2 restart"` |
+| Symptom                         | Remote Check                                                       | Fix                                                        |
+| ------------------------------- | ------------------------------------------------------------------ | ---------------------------------------------------------- |
+| No `/dev/video*` devices        | `ssh pi@<pi-ip> "ls /dev/video*"`                                  | `sudo raspi-config` → Interface → Camera → Enable → Reboot |
+| `rpicam-hello` exits with error | `ssh pi@<pi-ip> "rpicam-hello --nopreview --timeout 2000 2>&1"`    | Check ribbon cable; re-seat it                             |
+| `picamera2` import fails        | `ssh pi@<pi-ip> "python3 -c 'from picamera2 import Picamera2'"`    | `sudo apt install python3-picamera2`                       |
+| YOLO service not running        | `ssh pi@<pi-ip> "sudo systemctl status ultralytics-local.service"` | `ssh pi@<pi-ip> "./team2 restart"`                         |
 
 ---
 
@@ -1810,26 +1858,26 @@ Before deploying Team 2 (local), reclaim disk space by removing all Docker resou
 ### 25.2 Script Usage
 
 ```bash
-./cleanup.sh --status     # Preview current Docker disk usage (no changes)
-./cleanup.sh              # Show usage then prompt for confirmation
-./cleanup.sh --force      # Skip confirmation, clean everything
+./cleanup.sh --status # Preview current Docker disk usage (no changes)
+./cleanup.sh          # Show usage then prompt for confirmation
+./cleanup.sh --force  # Skip confirmation, clean everything
 ```
 
 ### 25.3 What Gets Removed
 
-| Resource | Path / Identifier | Size (approx) |
-|----------|-------------------|:------------:|
-| Systemd service | `ultralytics-docker.service` | — |
-| Docker container | `ultralytics-pi-cam` | ~100 MB |
-| Docker image | `ultralytics/ultralytics:latest-arm64` | ~1.5 GB |
-| All other containers | Any remaining containers | Varies |
-| Docker system cache | Build cache, volumes, networks | ~500 MB |
-| Team 1 results | `~/ultralytics/data/` | Varies |
-| **Total freed** | | **~2.5 GB+** |
+| Resource             | Path / Identifier                      | Size (approx) |
+| -------------------- | -------------------------------------- | :-----------: |
+| Systemd service      | `ultralytics-docker.service`           |       —       |
+| Docker container     | `ultralytics-pi-cam`                   |    ~100 MB    |
+| Docker image         | `ultralytics/ultralytics:latest-arm64` |    ~1.5 GB    |
+| All other containers | Any remaining containers               |    Varies     |
+| Docker system cache  | Build cache, volumes, networks         |    ~500 MB    |
+| Team 1 results       | `~/ultralytics/data/`                  |    Varies     |
+| **Total freed**      |                                        | **~2.5 GB+**  |
 
 ### 25.4 Manual Cleanup (Without Script)
 
-```bash
+````bash
 # Stop and remove service
 sudo systemctl stop ultralytics-docker.service
 sudo systemctl disable ultralytics-docker.service
@@ -1866,7 +1914,6 @@ Everything runs **on the Pi** using Python stdlib only (no Flask, no Node.js). A
 ### 26.2 Accessing the Gallery
 
 The gallery auto-starts on boot via `ultralytics-gallery.service` (created by `./team2 setup`).
-
 ```bash
 # Start/stop the gallery manually (manages both inference + gallery)
 ./team2 start
@@ -1874,7 +1921,7 @@ The gallery auto-starts on boot via `ultralytics-gallery.service` (created by `.
 
 # Or start standalone (foreground, for testing)
 ./team2 gallery
-```
+````
 
 Then open a browser at:
 
@@ -1886,11 +1933,11 @@ The Pi's IP address is shown at the top of the page and in the terminal when the
 
 ### 26.3 Page Layout
 
-| Section | Description |
-|---------|-------------|
-| **Live View** | Latest annotated camera frame at 640x480 — auto-refreshes every 5 seconds. Shows whatever the camera sees with YOLO bounding boxes and labels |
-| **Last 10 Detections** | Thumbnails of the 10 most recent detection images with **View** (full size) and **Download** links |
-| **Full Gallery** | Click "Full Detection Gallery" to see all saved detection images (10-column grid, auto-refresh every 10s) |
+| Section                | Description                                                                                                                                   |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Live View**          | Latest annotated camera frame at 640x480 — auto-refreshes every 5 seconds. Shows whatever the camera sees with YOLO bounding boxes and labels |
+| **Last 10 Detections** | Thumbnails of the 10 most recent detection images with **View** (full size) and **Download** links                                            |
+| **Full Gallery**       | Click "Full Detection Gallery" to see all saved detection images (10-column grid, auto-refresh every 10s)                                     |
 
 ### 26.4 Downloading Images
 
@@ -1900,10 +1947,10 @@ You can also download the images directly via command line:
 
 ```bash
 # From your laptop — download all detection images
-scp pi@<pi-ip>:~/ultralytics-local/results/detect_*.jpg .
+scp pi@ . < pi-ip > :~/ultralytics-local/results/detect_*.jpg
 
 # Or via HTTP
-curl -O http://<pi-ip>:5000/download/detect_20260624_143201.jpg
+curl -O http:// < pi-ip > :5000/download/detect_20260624_143201.jpg
 ```
 
 ### 26.5 Sharing the Gallery
@@ -1911,6 +1958,7 @@ curl -O http://<pi-ip>:5000/download/detect_20260624_143201.jpg
 Anyone on the same local network can access the gallery at `http://<pi-ip>:5000`.
 
 **To make it accessible over the internet**, you would need to:
+
 1. Set up port forwarding on your router (port 5000 → Pi's local IP)
 2. Or use a tunnel service like `ngrok http 5000`
 3. Or use Tailscale/ZeroTier for a secure VPN
@@ -1944,6 +1992,7 @@ After updating the `team2` script (e.g., if you pulled changes), regenerate the 
 # Test the new version standalone
 ./team2 gallery
 ```
+
 ```
 
 ---
@@ -1965,10 +2014,12 @@ Frames without any of these targets are **silently discarded** — no disk waste
 ### 27.2 How It Works
 
 ```
+
 [Camera] → every Ns → YOLO inference → save latest.jpg → filter [0,15,16] → match?
-                                                                           → YES → save detect_TS.jpg + JSONL + FIFO cleanup
-                                                                           → NO  → discard silently
-```
+→ YES → save detect_TS.jpg + JSONL + FIFO cleanup
+→ NO → discard silently
+
+````
 
 Each saved image includes:
 - **Timestamp overlay** on the image itself (`cv2.putText` — "2026-06-27 14:32:01" in green, bottom-left)
@@ -1995,7 +2046,7 @@ Settings are read from `~/ultralytics-local/results/config.json` (written by the
 
 ```bash
 CAPTURE_INTERVAL=3 CONF_THRESH=0.5 ./team2 wildlife
-```
+````
 
 **Override permanently (systemd drop-in):**
 
@@ -2036,27 +2087,28 @@ Press `Ctrl+C` to stop. All saved images go to `~/ultralytics-local/results/`.
 
 The gallery runs on **port 5000** at `http://<pi-ip>:5000` and provides:
 
-| Feature | Description |
-|---------|-------------|
-| **Live View** | Latest camera frame (annotated, updates every capture cycle) |
-| **Class Filter** | Dropdown to show only Person / Cat / Bird detections in the gallery |
+| Feature            | Description                                                                                                                    |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| **Live View**      | Latest camera frame (annotated, updates every capture cycle)                                                                   |
+| **Class Filter**   | Dropdown to show only Person / Cat / Bird detections in the gallery                                                            |
 | **Settings Panel** | Gear icon ⚙ opens a modal to change capture interval, max files, min free space, camera resolution, and auto-refresh interval |
-| **Gallery** | 10-column grid of all saved `detect_*.jpg` images with lightbox (prev/next via buttons or arrow keys) and download |
-| **FIFO Cleanup** | Oldest files auto-deleted when max count exceeded or free space drops below threshold |
+| **Gallery**        | 10-column grid of all saved `detect_*.jpg` images with lightbox (prev/next via buttons or arrow keys) and download             |
+| **FIFO Cleanup**   | Oldest files auto-deleted when max count exceeded or free space drops below threshold                                          |
 
 #### 27.5.1 Settings Panel
 
 Click the ⚙ gear icon in the top bar of any gallery page to open the settings modal:
 
-| Setting | Default | Range | Description |
-|---------|---------|-------|-------------|
-| Capture Interval | 5s | 1s – 5min | Time between camera capture + inference cycles |
-| Max Files | 1000 | 10 – 1,000,000 | FIFO limit — oldest images deleted when exceeded |
-| Min Free Space (GB) | 1 GB | 0 – 100 GB | System always keeps at least this much disk free by deleting old images |
-| Camera Resolution | 1920×1080 (Full HD) | 1920×1080 / 3280×2464 | Pi Camera v2 capture resolution — Full HD or 8MP Max |
-| Auto-Refresh Interval | 10s | 1s – 5min | How often the gallery page auto-refreshes — pauses while lightbox is open |
+| Setting               | Default             | Range                 | Description                                                               |
+| --------------------- | ------------------- | --------------------- | ------------------------------------------------------------------------- |
+| Capture Interval      | 5s                  | 1s – 5min             | Time between camera capture + inference cycles                            |
+| Max Files             | 1000                | 10 – 1,000,000        | FIFO limit — oldest images deleted when exceeded                          |
+| Min Free Space (GB)   | 1 GB                | 0 – 100 GB            | System always keeps at least this much disk free by deleting old images   |
+| Camera Resolution     | 1920×1080 (Full HD) | 1920×1080 / 3280×2464 | Pi Camera v2 capture resolution — Full HD or 8MP Max                      |
+| Auto-Refresh Interval | 10s                 | 1s – 5min             | How often the gallery page auto-refreshes — pauses while lightbox is open |
 
 The modal also shows:
+
 - **Current file count** — number of `detect_*.jpg` files saved
 - **Disk usage** — used / free / total space on the results partition
 
@@ -2077,28 +2129,28 @@ The filter is persistent across Live View / Latest / Oldest gallery pages via th
 
 #### 27.5.3 Gallery Endpoints
 
-| Endpoint | Description |
-|----------|-------------|
-| `GET /` | Main page: Live View + last 10 detections (5s auto-refresh; pauses while lightbox is open) |
-| `GET /?class=cat` | Filtered main page |
-| `GET /gallery` | Latest detection images (10s auto-refresh) |
-| `GET /gallery?view=oldest` | Oldest detection images |
-| `GET /gallery?class=person` | Filtered gallery |
-| `GET /config` | Current settings as JSON (includes disk usage and file count) |
-| `POST /config` | Update settings via JSON body |
-| `GET /latest` | Annotated `latest.jpg` (no-cache for live feed) |
-| `GET /thumb/{name}` | Raw JPEG bytes for gallery grid thumbnails (no `Content-Disposition`, so browser renders inline) |
-| `GET /image/{name}` | Full-size detection image in an HTML page with **← Live View**, **← Gallery**, **< Prev** / **Next >** navigation links, position indicator (e.g. "Image 3 of 25"), and **Escape** / **←** / **→** arrow key support |
-| `GET /download/{name}` | Detection image with download prompt |
+| Endpoint                    | Description                                                                                                                                                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /`                     | Main page: Live View + last 10 detections (5s auto-refresh; pauses while lightbox is open)                                                                                                                           |
+| `GET /?class=cat`           | Filtered main page                                                                                                                                                                                                   |
+| `GET /gallery`              | Latest detection images (10s auto-refresh)                                                                                                                                                                           |
+| `GET /gallery?view=oldest`  | Oldest detection images                                                                                                                                                                                              |
+| `GET /gallery?class=person` | Filtered gallery                                                                                                                                                                                                     |
+| `GET /config`               | Current settings as JSON (includes disk usage and file count)                                                                                                                                                        |
+| `POST /config`              | Update settings via JSON body                                                                                                                                                                                        |
+| `GET /latest`               | Annotated `latest.jpg` (no-cache for live feed)                                                                                                                                                                      |
+| `GET /thumb/{name}`         | Raw JPEG bytes for gallery grid thumbnails (no `Content-Disposition`, so browser renders inline)                                                                                                                     |
+| `GET /image/{name}`         | Full-size detection image in an HTML page with **← Live View**, **← Gallery**, **< Prev** / **Next >** navigation links, position indicator (e.g. "Image 3 of 25"), and **Escape** / **←** / **→** arrow key support |
+| `GET /download/{name}`      | Detection image with download prompt                                                                                                                                                                                 |
 
 #### 27.5.4 Image Navigation
 
 Both the lightbox (click thumbnail) and full-page view (click **View**) support browsing through detection images:
 
-| Action | Lightbox | Full-page (`/image/{name}`) |
-|--------|----------|-----------------------------|
-| **Previous** | Click ◀ button or press ← | Click **< Prev** link or press ← |
-| **Next** | Click ▶ button or press → | Click **Next >** link or press → |
+| Action           | Lightbox                                                                      | Full-page (`/image/{name}`)                          |
+| ---------------- | ----------------------------------------------------------------------------- | ---------------------------------------------------- |
+| **Previous**     | Click ◀ button or press ←                                                    | Click **< Prev** link or press ←                     |
+| **Next**         | Click ▶ button or press →                                                    | Click **Next >** link or press →                     |
 | **Close / Back** | Click **✖ Close** button, click overlay, click **← Live View**, or press Esc | Click **← Live View** or **← Gallery**, or press Esc |
 
 When the lightbox opens, the page's auto-refresh timer is **paused** (via `clearTimeout`) so the image stays on screen indefinitely. Auto-refresh resumes when the lightbox closes.
@@ -2135,45 +2187,45 @@ The full-page view also shows the current image position (e.g. "Image 3 of 25") 
 
 ### 27.8 Performance Tips on Pi 4
 
-| Setting | ~FPS | Notes |
-|---------|:----:|-------|
-| Default (320px, NCNN) | ~10 FPS | 5s interval gives plenty of headroom |
-| `IMGSZ=224` | ~15 FPS | Faster but less accurate on small targets |
-| `IMGSZ=640` | ~3 FPS | Better detection of distant objects |
+| Setting               |  ~FPS   | Notes                                     |
+| --------------------- | :-----: | ----------------------------------------- |
+| Default (320px, NCNN) | ~10 FPS | 5s interval gives plenty of headroom      |
+| `IMGSZ=224`           | ~15 FPS | Faster but less accurate on small targets |
+| `IMGSZ=640`           | ~3 FPS  | Better detection of distant objects       |
 
 The default 5-second capture interval leaves the CPU idle ~95% of the time, keeping thermals low for 24/7 operation. Longer intervals (30s–5min) reduce disk writes and CPU load further.
 
 ### 27.9 What Changed
 
-| File | Change |
-|------|--------|
-| `team2` | Replaced embedded inference script with `run_wildlife.py` (periodic class-filtered capture + `latest.jpg`) |
-| `team2` | Added `load_config()` / `write_default_config()` for shared `config.json` |
-| `team2` | Added free-space-aware FIFO cleanup (`min_free_space_gb`) via `os.statvfs` |
-| `team2` | Added polling 1s sleep loop so capture interval changes take effect promptly |
-| `team2` | Added `/config` (GET/POST) endpoints to web gallery for runtime settings |
-| `team2` | Added class filter (Person/Cat/Bird) dropdown in gallery live view and gallery pages |
-| `team2` | Added settings modal (gear icon) with capture interval, max files, min free space, and camera resolution inputs |
-| `team2` | Renamed `SERVICE_NAME` from `ultralytics-local.service` to `ultralytics-wildlife.service` |
-| `team2` | Updated INDEX_HTML and GALLERY_HTML templates with filter/settings/disk info |
-| `team2` | Changed gallery grids to `repeat(10, 1fr)` for 10-column layout |
-| `team2` | Added prev/next buttons + arrow key navigation to lightbox in both INDEX_HTML and GALLERY_HTML |
-| `team2` | Added **< Prev** / **Next >** links, position indicator, and **←** / **→** arrow keys to `send_image()` full-page view |
-| `team2` | Fixed unescaped `%` in Python `%`-formatted templates: JavaScript `% n` modulo and CSS `top:50%;transform:translateY(-50%)` (both caused "not enough arguments for format string" 503 error) |
-| `team2` | Added `/thumb/{name}` endpoint returning raw JPEG bytes; thumbnails in grid changed from `/image/{name}` (full HTML page) to `/thumb/{name}` so browser renders them correctly |
-| `team2` | Lightbox JS selector updated from `[src^=\"/image/\"]` to `[src^=\"/thumb/\"]` to match new thumbnail src |
-| `team2` | Added `.detection-grid` CSS to GALLERY_HTML — gallery page was missing grid styling for the `detection-grid` class used by `_detection_cards()`, causing cards to stack vertically instead of in a 10-column raster on `/gallery` |
-| `team2` | Changed `.card img` from `object-fit: cover` to `object-fit: contain` in both INDEX_HTML and GALLERY_HTML — `cover` cropped thumbnails to a strip, `contain` shows the full image with letterboxing |
-| `team2` | Changed gallery page grid from `repeat(10, 1fr)` to `repeat(auto-fill, minmax(220px, 1fr))` — each card at least 220px wide for viewable thumbnails; increased `.card img` height from 150px to 200px; removed redundant `.gallery` wrapper div |
-| `team2` | Lightbox auto-refresh fix: `clearTimeout(refreshTimer)` on lightbox open, `resetRefreshTimer()` on close — prevents lightbox image from disappearing on page reload; added `✖ Close` button and `← Live View` link to lightbox overlay in both INDEX_HTML and GALLERY_HTML |
-| `team2` | Camera resolution fix: removed `sensor_mode` kwarg from `create_still_configuration()`/`create_preview_configuration()` (picamera2 v0.5.2 doesn't support it) |
-| `team2` | Camera resolution fix: close failed `Picamera2()` on each retry in `init_camera()` — prevents "Camera in Acquired state" lock on retries |
-| `team2` | Camera resolution fix: `reconfig()` creates fresh `Picamera2` instead of reconfiguring (cleaner state); properly closes old camera before creating new one |
-| `team2` | Added `DIAG:` diagnostic logging in `reconfig()` and main loop (frame shape, plot result, latest.jpg write size) |
-| `team2` | Added `auto_refresh` to `CONFIG_DEFAULTS` and `load_gallery_config()` — saved to `config.json`, rendered into `REFRESH_MS` JS var and "auto-refresh every Ns" text in both INDEX_HTML and GALLERY_HTML |
-| `team2` | Added `_sec_label()` helper — formats seconds as human label (e.g. 300→"5min") |
-| `team2` | Added Auto-Refresh Interval dropdown to settings modal in both INDEX_HTML and GALLERY_HTML — same options as capture interval (1s/5s/10s/30s/60s/5min) |
-| `PLAN.md` | Updated this section; added Appendix A — Camera Resolution Troubleshooting |
+| File      | Change                                                                                                                                                                                                                                                                      |
+| --------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `team2`   | Replaced embedded inference script with `run_wildlife.py` (periodic class-filtered capture + `latest.jpg`)                                                                                                                                                                  |
+| `team2`   | Added `load_config()` / `write_default_config()` for shared `config.json`                                                                                                                                                                                                   |
+| `team2`   | Added free-space-aware FIFO cleanup (`min_free_space_gb`) via `os.statvfs`                                                                                                                                                                                                  |
+| `team2`   | Added polling 1s sleep loop so capture interval changes take effect promptly                                                                                                                                                                                                |
+| `team2`   | Added `/config` (GET/POST) endpoints to web gallery for runtime settings                                                                                                                                                                                                    |
+| `team2`   | Added class filter (Person/Cat/Bird) dropdown in gallery live view and gallery pages                                                                                                                                                                                        |
+| `team2`   | Added settings modal (gear icon) with capture interval, max files, min free space, and camera resolution inputs                                                                                                                                                             |
+| `team2`   | Renamed `SERVICE_NAME` from `ultralytics-local.service` to `ultralytics-wildlife.service`                                                                                                                                                                                   |
+| `team2`   | Updated INDEX_HTML and GALLERY_HTML templates with filter/settings/disk info                                                                                                                                                                                                |
+| `team2`   | Changed gallery grids to `repeat(10, 1fr)` for 10-column layout                                                                                                                                                                                                             |
+| `team2`   | Added prev/next buttons + arrow key navigation to lightbox in both INDEX_HTML and GALLERY_HTML                                                                                                                                                                              |
+| `team2`   | Added **< Prev** / **Next >** links, position indicator, and **←** / **→** arrow keys to `send_image()` full-page view                                                                                                                                                      |
+| `team2`   | Fixed unescaped `%` in Python `%`-formatted templates: JavaScript `% n` modulo and CSS `top:50%;transform:translateY(-50%)` (both caused "not enough arguments for format string" 503 error)                                                                                |
+| `team2`   | Added `/thumb/{name}` endpoint returning raw JPEG bytes; thumbnails in grid changed from `/image/{name}` (full HTML page) to `/thumb/{name}` so browser renders them correctly                                                                                              |
+| `team2`   | Lightbox JS selector updated from `[src^=\"/image/\"]` to `[src^=\"/thumb/\"]` to match new thumbnail src                                                                                                                                                                   |
+| `team2`   | Added `.detection-grid` CSS to GALLERY_HTML — gallery page was missing grid styling for the `detection-grid` class used by `_detection_cards()`, causing cards to stack vertically instead of in a 10-column raster on `/gallery`                                           |
+| `team2`   | Changed `.card img` from `object-fit: cover` to `object-fit: contain` in both INDEX_HTML and GALLERY_HTML — `cover` cropped thumbnails to a strip, `contain` shows the full image with letterboxing                                                                         |
+| `team2`   | Changed gallery page grid from `repeat(10, 1fr)` to `repeat(auto-fill, minmax(220px, 1fr))` — each card at least 220px wide for viewable thumbnails; increased `.card img` height from 150px to 200px; removed redundant `.gallery` wrapper div                             |
+| `team2`   | Lightbox auto-refresh fix: `clearTimeout(refreshTimer)` on lightbox open, `resetRefreshTimer()` on close — prevents lightbox image from disappearing on page reload; added `✖ Close` button and `← Live View` link to lightbox overlay in both INDEX_HTML and GALLERY_HTML |
+| `team2`   | Camera resolution fix: removed `sensor_mode` kwarg from `create_still_configuration()`/`create_preview_configuration()` (picamera2 v0.5.2 doesn't support it)                                                                                                               |
+| `team2`   | Camera resolution fix: close failed `Picamera2()` on each retry in `init_camera()` — prevents "Camera in Acquired state" lock on retries                                                                                                                                    |
+| `team2`   | Camera resolution fix: `reconfig()` creates fresh `Picamera2` instead of reconfiguring (cleaner state); properly closes old camera before creating new one                                                                                                                  |
+| `team2`   | Added `DIAG:` diagnostic logging in `reconfig()` and main loop (frame shape, plot result, latest.jpg write size)                                                                                                                                                            |
+| `team2`   | Added `auto_refresh` to `CONFIG_DEFAULTS` and `load_gallery_config()` — saved to `config.json`, rendered into `REFRESH_MS` JS var and "auto-refresh every Ns" text in both INDEX_HTML and GALLERY_HTML                                                                      |
+| `team2`   | Added `_sec_label()` helper — formats seconds as human label (e.g. 300→"5min")                                                                                                                                                                                              |
+| `team2`   | Added Auto-Refresh Interval dropdown to settings modal in both INDEX_HTML and GALLERY_HTML — same options as capture interval (1s/5s/10s/30s/60s/5min)                                                                                                                      |
+| `PLAN.md` | Updated this section; added Appendix A — Camera Resolution Troubleshooting                                                                                                                                                                                                  |
 
 ---
 
@@ -2184,6 +2236,7 @@ The default 5-second capture interval leaves the CPU idle ~95% of the time, keep
 The Pi 4's SD card can host a dedicated **exFAT data partition** that is natively readable on Windows, macOS, and Linux without any special drivers. This partition stores all detection images (`detect_*.jpg`) and logs (`detections.jsonl`) from both Team 1 (Docker) and Team 2 (local) deployments.
 
 **Why exFAT?**
+
 - **Windows** — plug the SD card into any Windows PC; detection images appear as a regular drive
 - **macOS** — native read/write support
 - **Linux** — exFAT supported in kernel 5.4+
@@ -2239,6 +2292,7 @@ Read the full documentation at the top of `setup-data-drive.sh` for initramfs de
 The setup has two phases:
 
 **Phase 1 — Boot-time resize (initramfs):**
+
 1. The script builds a gzipped cpio initramfs containing `e2fsck`, `resize2fs`, `fdisk`, `parted`, `mkfs.exfat`, `blkid`, and busybox
 2. It adds `initramfs wildlife-initrd.img` to `config.txt`
 3. On next boot, the initramfs `/init` runs before the root is mounted:
@@ -2255,6 +2309,7 @@ The setup has two phases:
    - `switch_root` to real root filesystem
 
 **Phase 2 — Post-reboot mount and symlinks:**
+
 1. Mounts exFAT partition at `/mnt/wildlife-data`
 2. Creates team1/ and team2/ subdirectories
 3. Adds fstab entry for auto-mount
@@ -2287,6 +2342,7 @@ sudo systemctl restart ultralytics-docker.service
 ```
 
 When `DATA_DRIVE=true` is set and the exFAT partition is mounted, the scripts:
+
 1. Check that `/mnt/wildlife-data` is mounted
 2. Verify the sentinel file `.wildlife_data_sentinel` exists
 3. Create the team subdirectory if needed
@@ -2305,6 +2361,7 @@ When `DATA_DRIVE=true` is set and the exFAT partition is mounted, the scripts:
 6. Copy images directly — no software installation needed
 
 **Alternative — access over the network (without removing the SD card):**
+
 ```bash
 # From Windows, use SCP (e.g. WinSCP) or:
 # Map a network drive to \\<pi-ip>\mnt\wildlife-data
@@ -2316,11 +2373,12 @@ When `DATA_DRIVE=true` is set and the exFAT partition is mounted, the scripts:
 Both `support` and `support2` scripts include a `datadrive` command:
 
 ```bash
-./support datadrive      # Check data drive health (Team 1 context)
-./support2 datadrive     # Check data drive health (Team 2 context)
+./support datadrive  # Check data drive health (Team 1 context)
+./support2 datadrive # Check data drive health (Team 2 context)
 ```
 
 Checks performed:
+
 - Is `/mnt/wildlife-data` mounted?
 - Filesystem type (should be exFAT)
 - Free space remaining
@@ -2332,27 +2390,27 @@ The data drive health check is also included in the full diagnostics run (`./sup
 
 ### 28.8 Troubleshooting
 
-| Problem | Cause | Fix |
-|---------|-------|-----|
-| `DATA_DRIVE=true` but results go to default dir | Data drive not mounted | `./setup-data-drive.sh status` → if not mounted, run `./setup-data-drive.sh sd` again or `sudo mount /mnt/wildlife-data` |
-| exFAT partition not visible on Windows | Unclean unmount | Run `./setup-data-drive.sh sync` on the Pi before shutting down; or use "Safely Remove Hardware" on Windows |
-| "No space left on device" | exFAT partition full (6GB default) | Delete old images from Windows File Explorer; or increase `TARGET_SIZE_GB` in `setup-data-drive.sh` and re-run |
-| Root partition resize failed | Not enough free space | Check `df -h` on the Pi — need at least ~2GB free on root before running `sd` command |
-| Boot hangs after `sd` command | Initramfs issue | Reflash SD card from backup; see recovery instructions in `setup-data-drive.sh` header |
-| Symlink broken after removal | Data drive removed without cleanup | Re-run `./setup-data-drive.sh remove` to clean up, or manually remove symlinks + fstab entry |
+| Problem                                         | Cause                              | Fix                                                                                                                      |
+| ----------------------------------------------- | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `DATA_DRIVE=true` but results go to default dir | Data drive not mounted             | `./setup-data-drive.sh status` → if not mounted, run `./setup-data-drive.sh sd` again or `sudo mount /mnt/wildlife-data` |
+| exFAT partition not visible on Windows          | Unclean unmount                    | Run `./setup-data-drive.sh sync` on the Pi before shutting down; or use "Safely Remove Hardware" on Windows              |
+| "No space left on device"                       | exFAT partition full (6GB default) | Delete old images from Windows File Explorer; or increase `TARGET_SIZE_GB` in `setup-data-drive.sh` and re-run           |
+| Root partition resize failed                    | Not enough free space              | Check `df -h` on the Pi — need at least ~2GB free on root before running `sd` command                                    |
+| Boot hangs after `sd` command                   | Initramfs issue                    | Reflash SD card from backup; see recovery instructions in `setup-data-drive.sh` header                                   |
+| Symlink broken after removal                    | Data drive removed without cleanup | Re-run `./setup-data-drive.sh remove` to clean up, or manually remove symlinks + fstab entry                             |
 
 ### 28.9 What Changed
 
-| File | Change |
-|------|--------|
-| `setup-data-drive.sh` | New script — initramfs-based boot-time resize, exFAT creation, mount/symlink setup, status/sync/remove commands |
-| `team1` | Added `DATA_DRIVE` env var awareness: redirects `RESULTS_DIR` to `/mnt/wildlife-data/team1` when set |
-| `team2` | Added `DATA_DRIVE` env var awareness: redirects `RESULTS_DIR` to `/mnt/wildlife-data/team2` when set |
-| `support` | Added `check_data_drive()` function (mount, FS type, free space, sentinel, symlinks, fstab); new `datadrive` subcommand; included in full diagnostics |
-| `support2` | Added `check_data_drive()` function (same checks, Team 2 context); new `datadrive` subcommand; included in full diagnostics |
-| `setup-data-drive.sh` | Added `docs` subcommand — copies `PLAN.md` and `TEST.md` to the exFAT partition root |
-| `PLAN.md` | Added this section; added `docs` subcommand reference in 28.3 |
-| `TEST.md` | Updated with full test plan covering static, unit, and integration test levels |
+| File                  | Change                                                                                                                                                |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `setup-data-drive.sh` | New script — initramfs-based boot-time resize, exFAT creation, mount/symlink setup, status/sync/remove commands                                       |
+| `team1`               | Added `DATA_DRIVE` env var awareness: redirects `RESULTS_DIR` to `/mnt/wildlife-data/team1` when set                                                  |
+| `team2`               | Added `DATA_DRIVE` env var awareness: redirects `RESULTS_DIR` to `/mnt/wildlife-data/team2` when set                                                  |
+| `support`             | Added `check_data_drive()` function (mount, FS type, free space, sentinel, symlinks, fstab); new `datadrive` subcommand; included in full diagnostics |
+| `support2`            | Added `check_data_drive()` function (same checks, Team 2 context); new `datadrive` subcommand; included in full diagnostics                           |
+| `setup-data-drive.sh` | Added `docs` subcommand — copies `PLAN.md` and `TEST.md` to the exFAT partition root                                                                  |
+| `PLAN.md`             | Added this section; added `docs` subcommand reference in 28.3                                                                                         |
+| `TEST.md`             | Updated with full test plan covering static, unit, and integration test levels                                                                        |
 
 ---
 
@@ -2404,20 +2462,20 @@ print('OK')
 
 After adding diagnostic logging (see `team2`), the log will contain `DIAG:` lines showing:
 
-| Prefix | What it means |
-|--------|--------------|
-| `DIAG: resolution change detected` | `reconfig()` triggered |
-| `DIAG: reconfig — stopping camera` | About to call `cam.stop()` |
-| `DIAG: reconfig — building config` | About to build new camera config |
-| `DIAG: reconfig — configuring camera` | About to call `cam.configure()` |
-| `DIAG: reconfig — starting camera` | About to call `cam.start()` |
-| `DIAG: reconfig — warm-up capture` | Discarding first frame after reconfig |
-| `DIAG: reconfig — FAILED` | Reconfiguration raised an exception |
-| `DIAG: loop — frame shape=` | Frame captured successfully with dimensions |
-| `DIAG: loop — plot() OK` | Annotation rendering succeeded |
-| `DIAG: loop — wrote latest.jpg` | File written to disk with byte size |
-| `DIAG: loop — FAILED to write latest.jpg` | `cv2.imwrite` returned false |
-| `DIAG: loop — captured failed` | `capture_array()` raised exception |
+| Prefix                                    | What it means                               |
+| ----------------------------------------- | ------------------------------------------- |
+| `DIAG: resolution change detected`        | `reconfig()` triggered                      |
+| `DIAG: reconfig — stopping camera`        | About to call `cam.stop()`                  |
+| `DIAG: reconfig — building config`        | About to build new camera config            |
+| `DIAG: reconfig — configuring camera`     | About to call `cam.configure()`             |
+| `DIAG: reconfig — starting camera`        | About to call `cam.start()`                 |
+| `DIAG: reconfig — warm-up capture`        | Discarding first frame after reconfig       |
+| `DIAG: reconfig — FAILED`                 | Reconfiguration raised an exception         |
+| `DIAG: loop — frame shape=`               | Frame captured successfully with dimensions |
+| `DIAG: loop — plot() OK`                  | Annotation rendering succeeded              |
+| `DIAG: loop — wrote latest.jpg`           | File written to disk with byte size         |
+| `DIAG: loop — FAILED to write latest.jpg` | `cv2.imwrite` returned false                |
+| `DIAG: loop — captured failed`            | `capture_array()` raised exception          |
 
 To watch logs live while testing:
 
