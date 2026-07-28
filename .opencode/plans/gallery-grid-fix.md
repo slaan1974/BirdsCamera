@@ -5,22 +5,27 @@
 ### 1. GALLERY_HTML — `.detection-grid` CSS (responsive columns)
 
 Replace:
+
 ```css
 .detection-grid {
-    display: grid; grid-template-columns: repeat(10, 1fr);
-    gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 10px;
 }
 .gallery {
-    display: grid; grid-template-columns: repeat(10, 1fr);
-    gap: 12px;
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 12px;
 }
 ```
 
 With:
+
 ```css
 .detection-grid {
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    gap: 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 10px;
 }
 ```
 
