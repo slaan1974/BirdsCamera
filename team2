@@ -135,7 +135,7 @@ setup_data_drive() {
 
     if [ ! -f "${DATA_DRIVE_MOUNT}/${DATA_DRIVE_SENTINEL}" ]; then
         warn "Sentinel file '${DATA_DRIVE_SENTINEL}' not found on ${DATA_DRIVE_MOUNT}"
-        warn "  Run ./setup-data-drive.sh sd to initialise the data partition"
+        warn "  Run ./setup-data-drive.sh sd to initialize the data partition"
         warn "  Falling back to default results directory"
         RESULTS_DIR="${BASE_DIR}/results"
         return
@@ -383,7 +383,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("wildlife")
 
-# ── Camera Initialisation ──────────────────────────────────────────────────────
+# ── Camera Initialization ──────────────────────────────────────────────────────
 
 def _build_config(picam2, resolution):
     """Return a picamera2 configuration for the given resolution string."""
@@ -405,7 +405,7 @@ def init_camera(resolution="1920x1080"):
             picam2.configure(config)
             picam2.start()
             time.sleep(2)
-            log.info("Camera initialised (picamera2) — %s", resolution)
+            log.info("Camera initialized (picamera2) — %s", resolution)
             return picam2
         except Exception as e:
             log.warning("Camera init attempt %d/5 failed: %s", attempt + 1, e)
@@ -415,7 +415,7 @@ def init_camera(resolution="1920x1080"):
                 except Exception:
                     pass
             time.sleep(2)
-    raise RuntimeError("Could not initialise camera after 5 attempts")
+    raise RuntimeError("Could not initialize camera after 5 attempts")
 
 # ── FIFO cleanup ───────────────────────────────────────────────────────────────
 
@@ -573,7 +573,7 @@ def main():
                 cam = None
             time.sleep(1)
             cam = init_camera(CFG.get("camera_resolution", "1920x1080"))
-            log.info("DIAG: loop — camera reinitialised after capture failure")
+            log.info("DIAG: loop — camera reinitialized after capture failure")
             continue
 
         log.info("DIAG: loop — model inference starting (frame=%s)", frame.shape)
