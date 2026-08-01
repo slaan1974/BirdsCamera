@@ -110,7 +110,7 @@ setup_data_drive() {
 
     if [ ! -f "${DATA_DRIVE_MOUNT}/${DATA_DRIVE_SENTINEL}" ]; then
         warn "Sentinel file '${DATA_DRIVE_SENTINEL}' not found on ${DATA_DRIVE_MOUNT}"
-        warn "  Run ./setup-data-drive.sh sd to initialise the data partition"
+        warn "  Run ./setup-data-drive.sh sd to initialize the data partition"
         warn "  Falling back to default results directory"
         RESULTS_DIR="${HOME_DIR}/ultralytics/data"
         INFERENCE_SCRIPT="${RESULTS_DIR}/run_yolo.py"
@@ -204,10 +204,10 @@ logging.basicConfig(
 )
 log = logging.getLogger("yolo_pi")
 
-# ── Camera Initialisation ──────────────────────────────────────────────────────
+# ── Camera Initialization ──────────────────────────────────────────────────────
 
 def init_camera_picamera2():
-    """Initialise Pi Camera v2 via picamera2."""
+    """Initialize Pi Camera v2 via picamera2."""
     for attempt in range(5):
         try:
             picam2 = Picamera2()
@@ -217,16 +217,16 @@ def init_camera_picamera2():
             picam2.configure(config)
             picam2.start()
             time.sleep(2)
-            log.info("Camera initialised (picamera2)")
+            log.info("Camera initialized (picamera2)")
             return picam2
         except Exception as e:
             log.warning("picamera2 attempt %d/5 failed: %s", attempt + 1, e)
             time.sleep(2)
-    raise RuntimeError("Could not initialise camera via picamera2 after 5 attempts")
+    raise RuntimeError("Could not initialize camera via picamera2 after 5 attempts")
 
 
 def init_camera_v4l2():
-    """Initialise camera via OpenCV V4L2 fallback."""
+    """Initialize camera via OpenCV V4L2 fallback."""
     for device_idx in (0, 1, 2, 3):
         path = f"/dev/video{device_idx}"
         if not os.path.exists(path):
@@ -242,16 +242,16 @@ def init_camera_v4l2():
                 # Warm-up read
                 ret, _ = cap.read()
                 if ret:
-                    log.info("Camera initialised (V4L2 on %s)", path)
+                    log.info("Camera initialized (V4L2 on %s)", path)
                     return cap
                 cap.release()
             except Exception as e:
                 log.warning("V4L2 attempt %d on %s failed: %s", attempt + 1, path, e)
-    raise RuntimeError("Could not initialise camera via V4L2 after all attempts")
+    raise RuntimeError("Could not initialize camera via V4L2 after all attempts")
 
 
 def init_camera():
-    """Initialise camera — try picamera2 first, fall back to OpenCV V4L2."""
+    """Initialize camera — try picamera2 first, fall back to OpenCV V4L2."""
     if HAVE_PICAMERA2:
         try:
             return init_camera_picamera2()
@@ -289,7 +289,7 @@ def main():
         try:
             frame = capture_frame(cam)
         except Exception as e:
-            log.error("Capture failed: %s — reinitialising camera", e)
+            log.error("Capture failed: %s — reinitializing camera", e)
             time.sleep(1)
             try:
                 if HAVE_PICAMERA2 and isinstance(cam, Picamera2):
