@@ -204,7 +204,7 @@ Requires actual Pi 4 hardware or QEMU VM. Documented as manual test plan below.
 | 13 | Position indicator | On image view page | Shows "Image N of M" in nav bar |
 | 14 | Lightbox Prev/Next | Open lightbox, click **◀** or **▶** buttons | Adjacent image shown |
 | 15 | Lightbox arrow keys | Open lightbox, press **←** or **→** | Adjacent image shown |
-| 16 | Gallery 10-column grid | Open `/gallery` and inspect | Exactly 10 `.card` elements per row |
+| 16 | Gallery responsive grid | Open `/gallery` and inspect | Cards use `auto-fill` with `minmax(220px, 1fr)` — at least 220px wide, responsive to screen width |
 | 17 | Thumbnails render correctly | Load Live View and Gallery pages | All thumbnails show JPEG content (not broken-image icons); inspect `<img>` src points to `/thumb/{name}` |
 
 ### 4.2 Chromium / Edge
@@ -294,10 +294,10 @@ Gallery grid thumbnails must point to an endpoint that returns **raw JPEG bytes*
 
 ### 7.3 Gallery page has no grid (cards stack vertically)
 
-The gallery page (`/gallery`) may show cards in a single column instead of a 10-column raster. The `_detection_cards()` method returns `<div class="detection-grid">`, but GALLERY_HTML only defined CSS for `.gallery`, not `.detection-grid`.
+The gallery page (`/gallery`) may show cards in a single column instead of a grid. The `_detection_cards()` method returns `<div class="detection-grid">`, but GALLERY_HTML only defined CSS for `.gallery`, not `.detection-grid`.
 
-**Fix:** Add `.detection-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 10px; }` to GALLERY_HTML's `<style>` block, matching the rule in INDEX_HTML.
-**Check:** Load `/gallery` and verify cards render in rows of 10, or run the integration test.
+**Fix:** Add `.detection-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }` to GALLERY_HTML's `<style>` block (responsive grid — at least 220px per card, wraps to the screen width), and drop the now-unused `.gallery` wrapper.
+**Check:** Load `/gallery` and verify cards render in a responsive grid, or run the integration test.
 
 ### 7.4 Thumbnails cropped to a strip (object-fit)
 
@@ -305,3 +305,34 @@ The gallery page (`/gallery`) may show cards in a single column instead of a 10-
 
 **Fix:** Change to `object-fit: contain` — the full image is visible within the box dimensions with letterbox bars on the sides or top/bottom.
 **Check:** Load the web page and verify that each thumbnail shows the complete picture without cropping.
+
+---
+
+## 8. Current Test Status & Findings (October 2026)
+
+### 8.1 Test counts
+
+| Suite | File | Tests | Runs on |
+|-------|------|:-----:|---------|
+| Static | `tests/pi_deployment/test_static.sh` | 82 | Any machine |
+| Team 1 | `tests/pi_deployment/test_team1.sh` | 25 | Any machine |
+| Team 2 | `tests/pi_deployment/test_team2.sh` | 29 | Any machine |
+| Support | `tests/pi_deployment/test_support.sh` | 44 | Any machine |
+| Data drive | `tests/pi_deployment/test_setup_data_drive.sh` | 47 | Any machine |
+| Cleanup | `tests/pi_deployment/test_cleanup.sh` | 18 | Any machine |
+| **Total** | | **245** | |
+| Integration | `tests/pi_deployment/test_integration.sh` | **not implemented** | Pi 4 |
+
+**Last verified:** static suite **82/82 passed** on 2026-10-07 after the Docker removal and documentation rewrite. Full 245/245 across all 6 suites was verified in the previous development session.
+
+### 8.2 Known limitations
+
+1. **No integration suite yet.** `tests/pi_deployment/test_integration.sh` does not exist — `--integration` and therefore `--all` cannot run. Section 3 of this document is the manual integration test plan until it is implemented (requires real Pi 4 hardware).
+2. **Runner summary shows 0/0/0.** `run-pi-tests.sh` prints each suite's own results correctly, but its final "Overall Results" block always shows `0 passed | 0 failed | 0 skipped` because suite counts are collected in sub-shells and lost on exit. Suite pass/fail **is** propagated correctly via exit codes, so the final verdict line ("All test suites passed" / failure) is trustworthy — only the aggregate numbers are wrong.
+3. **Docker-related test rows are still present.** `test_team1.sh`, `test_cleanup.sh`, and the `check_docker` checks in `test_support.sh` exercise Docker logic that remains embedded in `team1`, `cleanup.sh`, and `support`. Those scripts are retained for reference only (Docker deployment was removed) — the tests validate that the retained code is structurally intact, not a supported deployment path.
+4. **Windows checkouts break shebangs.** With `core.autocrlf=true` (Git for Windows default), scripts are checked out with CRLF endings, and running them under WSL/Linux fails with `env: 'bash\r': No such file or directory`. The git index stores LF, so clones on the Pi are unaffected. To run the suites on Windows, normalize a copy first (or set `core.autocrlf=input`):
+   ```bash
+   find . -type f \( -name '*.sh' -o -name 'team1' -o -name 'team2' -o -name 'support' -o -name 'support2' \) \
+     -exec sed -i 's/\r$//' {} +
+   ```
+5. **Static suite also validates docs.** `test_static.sh` checks that PLAN.md keeps its Data Drive section and `docs` subcommand documentation — editing PLAN.md structure can fail the suite even when the scripts are fine.

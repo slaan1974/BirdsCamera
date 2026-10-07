@@ -131,7 +131,7 @@ Ultralytics offers a variety of installation methods, including pip, conda, and 
 
         Replace `/path/on/host` with the directory path on your local machine, and `/path/in/container` with the desired path inside the Docker container.
 
-        For advanced Docker usage, explore the [Ultralytics Docker Guide](guides/docker-quickstart.md).
+        For advanced Docker usage, explore the [Ultralytics Docker Guide](https://docs.ultralytics.com/guides/docker-quickstart).
 
 See the `ultralytics` [pyproject.toml](https://github.com/ultralytics/ultralytics/blob/main/pyproject.toml) file for a list of dependencies. Note that all examples above install all required dependencies.
 
@@ -504,7 +504,7 @@ sudo docker pull ultralytics/ultralytics:latest
 sudo docker run -it --ipc=host --runtime=nvidia --gpus all ultralytics/ultralytics:latest
 ```
 
-For detailed Docker instructions, see the [Docker quickstart guide](guides/docker-quickstart.md).
+For detailed Docker instructions, see the [Docker quickstart guide](https://docs.ultralytics.com/guides/docker-quickstart).
 
 ### How do I clone the Ultralytics repository for development?
 

@@ -10,9 +10,9 @@ This document covers everything needed to run [Ultralytics YOLO](https://github.
 
 **Key facts:**
 - The repo already has extensive Raspberry Pi support (detection via `is_raspberrypi()` in `ultralytics/utils/__init__.py:783`)
-- An ARM64 Docker image exists at `ultralytics/ultralytics:latest-arm64`
 - CI runs benchmarks on a self-hosted Pi runner
 - **NCNN format is the #1 recommendation** for Pi 4 (best performance on ARM)
+- **Docker deployment was removed from this repo** — it did not work reliably on the Pi. The native path (`./team2 setup`) is the supported route; the Docker sections below are retained for reference only
 
 ---
 
@@ -51,19 +51,9 @@ This document covers everything needed to run [Ultralytics YOLO](https://github.
 
 ## 4. Installation Methods
 
-### Option A: Docker (Fastest — ~1 command)
+> **Note:** The Docker install option was removed from this repository (it did not work reliably on the Pi). Use the manual install below, or simply run `./team2 setup`, which automates the whole thing.
 
-```bash
-t=ultralytics/ultralytics:latest-arm64
-sudo docker pull $t && sudo docker run -it --ipc=host $t
-```
-
-Docker image is based on `arm64v8/ubuntu:24.04`, pre-installed with:
-- Python 3, PyTorch (CPU), OpenCV
-- All export dependencies (ONNX, OpenVINO, TensorFlow)
-- Pre-downloaded YOLO26n model weights
-
-### Option B: Manual Install (More Flexible)
+### Manual Install (More Flexible)
 
 ```bash
 # 1. System packages
@@ -376,12 +366,10 @@ Key files and directories in the repo relevant to Pi deployment:
 
 ```
 ultralytics/
-├── docker/Dockerfile-arm64              # ARM64 Docker image for Pi
 ├── docs/en/guides/
 │   ├── raspberry-pi.md                  # 📘 Main Pi guide (533 lines)
 │   ├── coral-edge-tpu-on-raspberry-pi.md  # Edge TPU + Pi guide
-│   ├── model-deployment-options.md      # Export format comparison
-│   └── docker-quickstart.md             # Docker setup on Pi
+│   └── model-deployment-options.md      # Export format comparison
 ├── docs/en/integrations/
 │   ├── ncnn.md                          # NCNN format docs
 │   ├── tflite.md                        # TFLite format docs
@@ -399,13 +387,6 @@ ultralytics/
 ## 12. Quick Start Summary
 
 ```bash
-# === EASIEST PATH: Docker ===
-sudo docker pull ultralytics/ultralytics:latest-arm64
-sudo docker run -it --ipc=host ultralytics/ultralytics:latest-arm64
-
-# Inside container:
-yolo predict model=yolo26n.pt source='https://ultralytics.com/images/bus.jpg'
-
 # === MANUAL PATH ===
 sudo apt update && sudo apt install python3-pip libgl1 -y
 pip install -U pip
@@ -463,6 +444,8 @@ cv2.destroyAllWindows()
 ---
 
 ## 14. Docker Container Lifecycle — Reboot, Connect, Persist
+
+> **Legacy:** Docker deployment has been removed from this repository (it did not work reliably on the Pi). Sections 14–20 are retained for reference only — use the native `./team2` path (section 21) for new deployments.
 
 ### 14.1 Installing Docker on Raspberry Pi (If Not Already Installed)
 
@@ -566,6 +549,8 @@ docker run -it --rm --ipc=host ultralytics/ultralytics:latest-arm64
 
 ## 15. NCNN Conversion Inside the Docker Container
 
+> **Legacy:** Docker deployment removed — see the note in section 14.
+
 ### 15.1 Why It Works
 
 The `Dockerfile-arm64` runs `pip install -e ".[export]"`, which installs **all** export dependencies including ONNX, OpenVINO, and the toolchains needed for NCNN conversion (PNNX). Everything you need is already present.
@@ -629,6 +614,8 @@ yolo export model=yolo26n.pt format=mnn         # Requires MNN tools
 ---
 
 ## 16. Docker Logs and Troubleshooting
+
+> **Legacy:** Docker deployment removed — see the note in section 14.
 
 ### 16.1 Container Logs
 
@@ -1001,6 +988,8 @@ docker run -d --name ultralytics-picam \
 
 ## 19. Full Docker Lifecycle Quick Reference
 
+> **Legacy:** Docker deployment removed — see the note in section 14.
+
 ```bash
 # ===== FIRST TIME SETUP =====
 # 1. Install Docker
@@ -1072,6 +1061,8 @@ docker restart ultralytics-pi
 ---
 
 ## 20. Team 1 — Docker Deployment with Camera v2 Auto-Start
+
+> **Legacy:** Docker deployment removed — see the note in section 14. The native Team 2 deployment (section 21) is the supported route.
 
 ### 20.1 Overview
 
@@ -1803,6 +1794,8 @@ scp pi@<pi-ip>:~/ultralytics-local/results/snapshot.jpg .
 
 ## 25. Cleanup — Remove Docker & Team 1 Artifacts (Free Disk Space)
 
+> **Legacy:** Retained for tearing down old Docker-based installs; `cleanup.sh` has no purpose on a native-only system.
+
 ### 25.1 Overview
 
 Before deploying Team 2 (local), reclaim disk space by removing all Docker resources and Team 1 data. The `cleanup.sh` script handles this automatically.
@@ -2356,6 +2349,16 @@ The data drive health check is also included in the full diagnostics run (`./sup
 
 ---
 
+## 29. Changelog
+
+| Date | Change |
+|------|--------|
+| 2026-10-07 | **Docker removal + documentation refresh.** Deleted `docker/` (14 Dockerfiles), `.dockerignore`, `.github/workflows/docker.yml`, and the 3 Docker docs pages; removed the `mkdocs.yml` Docker icon/nav entries; converted 17 inbound references across 14 docs pages to external URLs; removed the Docker install option and quickstart path from this document and added legacy banners to sections 14–20/25; rewrote `README.md` for BirdsCamera; added the investigation findings (Appendix B); extended `TEST.md` with current test status. |
+| 2026-10-07 | **Repo restored.** Local `.git` was unrecoverable (OneDrive sync damage) — rebuilt by re-cloning from GitHub; see Appendix B. |
+| 2026-07-03 | **`03072026 updates`** — deployment scripts (`team1`, `team2`, `support*`, `cleanup.sh`, `setup-data-drive.sh`), 245-test suite, wildlife detection, web gallery, data drive (see the per-section "What Changed" tables above). |
+
+---
+
 ## Appendix A — Camera Resolution Troubleshooting
 
 If the live view timestamp freezes after changing camera resolution, run these commands on the Pi to diagnose:
@@ -2424,3 +2427,39 @@ To watch logs live while testing:
 ```bash
 sudo journalctl -u ultralytics-wildlife.service -f
 ```
+
+---
+
+## Appendix B — Repository Investigation Findings (October 2026)
+
+### B.1 Summary
+
+During the October 2026 project audit the local working copy was found to be badly damaged, and the Docker-based deployment was confirmed as non-working. This appendix records what was found and what was done about it.
+
+### B.2 Findings
+
+| # | Finding | Detail |
+|---|---------|--------|
+| 1 | **Local `.git` unrecoverable** | No `HEAD`, `config`, `index`, `packed-refs`; **0 git objects** (empty hash dirs + a commit-graph only). `git status` failed with "not a git repository". Cause: almost certainly OneDrive sync corruption — the repo lives inside `OneDrive\Documents`. |
+| 2 | **Working tree ~64% empty** | 414 files locally vs **1,143 paths on GitHub**. Missing: all root files (`README.md`, `PLAN.md`, `TEST.md`, `AGENTS.md`, `pyproject.toml`, `mkdocs.yml`, `team1`, `team2`, `support*`, `cleanup.sh`, `run-pi-tests.sh`, `setup-data-drive.sh`), all of `docker/`, `tests/`, `.github/`, and much of `examples/` and `ultralytics/`. |
+| 3 | **2 local commits lost forever** | `23dffb1` *"Fix live feed, add ./team2 check health command, fix test runner summary"* and `470cadb` *"Add slow-WiFi gallery resilience, deploy security+live feed fixes to Pi"* were never pushed. GitHub returns 422 for both SHAs — the objects no longer exist anywhere. |
+| 4 | **GitHub remote healthy** | `slaan1974/BirdsCamera` (public), `main` at `6ba6f96` (*03072026 updates*, 2026-07-03), full 1,143-path tree, 8 dependabot branches, `gh` authenticated as `slaan1974`. |
+| 5 | **Docker footprint** | Files: `docker/` (14 Dockerfiles), `.dockerignore`, `.github/workflows/docker.yml`, 3 docs pages, 5 `mkdocs.yml` lines. Embedded logic retained untouched ("files only" scope): `team1` (fully Docker), `cleanup.sh`, `support`, plus Docker prose in `PLAN.md` and `README.md`. |
+| 6 | **Docs cross-links** | The 3 deleted Docker docs pages were referenced from **14 other docs pages** (17 references) + 5 `mkdocs.yml` lines — all fixed or converted to external `docs.ultralytics.com` URLs so no link dangles. |
+| 7 | **Tests** | 245 tests / 6 suites (static 82, team1 25, team2 29, support 44, data drive 47, cleanup 18); `tests/pi_deployment/` was missing locally and restored by the re-clone. |
+
+### B.3 What was done
+
+| Phase | Action | Status |
+|-------|--------|--------|
+| 1 | **Restore the repo** — moved the broken tree to `BirdsCamera-backup-20261007`, fresh `git clone` from GitHub, restored the only unique local file (`.opencode/.gitignore`), verified clean `main` at `6ba6f96` | ✅ |
+| 2 | **Remove Docker (files only)** — deleted the 19 Docker files/pages, fixed `mkdocs.yml` and all 17 inbound doc references, grepped to zero dangling local references | ✅ |
+| 3 | **Documentation** — rewrote `README.md`, updated `PLAN.md` (this appendix, changelog, legacy banners), `TEST.md`, `AGENTS.md` | ✅ |
+| 4 | **Verify, commit, push** — static test suite + grep verification, commit to `main`, push to GitHub | pending |
+
+### B.4 Warnings
+
+- **Never keep a git repository inside OneDrive** (or any synced folder). Sync tools can delete/rewrite `.git` internals; this is what destroyed the local clone.
+- **Push early and often.** The 2 lost commits survived only in a local reflog and are gone permanently.
+- The backup folder `BirdsCamera-backup-20261007` can be deleted once the final push is confirmed.
+

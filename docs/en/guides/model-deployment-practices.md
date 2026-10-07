@@ -49,7 +49,7 @@ However, edge devices often have limited processing power, so you'll need to opt
 
 Local Deployment is best when data privacy is critical or when there's unreliable or no internet access. Running models on local servers or desktops gives you full control and keeps your data secure. It can also reduce latency if the server is near the user.
 
-However, scaling locally can be tough, and maintenance can be time-consuming. Using tools like [Docker](./docker-quickstart.md) for containerization and Kubernetes for management can help make local deployments more efficient. Regular updates and maintenance are necessary to keep everything running smoothly.
+However, scaling locally can be tough, and maintenance can be time-consuming. Using tools like [Docker](https://docs.ultralytics.com/guides/docker-quickstart) for containerization and Kubernetes for management can help make local deployments more efficient. Regular updates and maintenance are necessary to keep everything running smoothly.
 
 ## Containerization for Streamlined Deployment
 
@@ -57,7 +57,7 @@ Containerization is a powerful approach that packages your model and all its dep
 
 ### Benefits of Using Docker for Model Deployment
 
-[Docker](./docker-quickstart.md) has become the industry standard for containerization in machine learning deployments for several reasons:
+[Docker](https://docs.ultralytics.com/guides/docker-quickstart) has become the industry standard for containerization in machine learning deployments for several reasons:
 
 - **Environment Consistency**: Docker containers encapsulate your model and all its dependencies, eliminating the "it works on my machine" problem by ensuring consistent behavior across development, testing, and production environments.
 - **Isolation**: Containers isolate applications from one another, preventing conflicts between different software versions or libraries.

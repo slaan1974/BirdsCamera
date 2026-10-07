@@ -40,7 +40,7 @@ The Coral Edge TPU is a compact device that adds an Edge TPU coprocessor to your
 - [Raspberry Pi 4B](https://www.raspberrypi.com/products/raspberry-pi-4-model-b/) (2GB or more recommended) or [Raspberry Pi 5](https://www.raspberrypi.com/products/raspberry-pi-5/) (Recommended)
 - [Raspberry Pi OS](https://www.raspberrypi.com/software/) Bullseye/Bookworm (64-bit) with desktop (Recommended)
 - [Coral USB Accelerator](https://developers.google.com/coral)
-- A non-ARM platform (Google Colab, an x86_64 Linux machine, or the [Ultralytics Docker container](docker-quickstart.md)) for exporting the model, since the Edge TPU compiler is not available on ARM
+- A non-ARM platform (Google Colab, an x86_64 Linux machine, or the [Ultralytics Docker container](https://docs.ultralytics.com/guides/docker-quickstart)) for exporting the model, since the Edge TPU compiler is not available on ARM
 
 This guide assumes you already have a working Raspberry Pi OS install with `ultralytics` and its dependencies installed. If not, follow the [quickstart guide](../quickstart.md) first.
 
@@ -83,7 +83,7 @@ After installing the runtime, plug your Coral Edge TPU into a USB 3.0 port on th
 
 ## Export Your Model to Edge TPU Format
 
-To use the Edge TPU, convert your model to a compatible format. Run the export on a non-ARM platform — Google Colab, an x86_64 Linux machine, the official [Ultralytics Docker container](docker-quickstart.md), or [Ultralytics Platform](../platform/quickstart.md) — since the Edge TPU compiler is not available on ARM. See the [Export mode](../modes/export.md) for the available arguments.
+To use the Edge TPU, convert your model to a compatible format. Run the export on a non-ARM platform — Google Colab, an x86_64 Linux machine, the official [Ultralytics Docker container](https://docs.ultralytics.com/guides/docker-quickstart), or [Ultralytics Platform](../platform/quickstart.md) — since the Edge TPU compiler is not available on ARM. See the [Export mode](../modes/export.md) for the available arguments.
 
 !!! example "Exporting the model"
 
@@ -223,7 +223,7 @@ Make sure to uninstall any previous Coral Edge TPU runtime versions by following
 
 ### Can I export my Ultralytics YOLO26 model to be compatible with Coral Edge TPU?
 
-Yes. Run the export on Google Colab, an x86_64 Linux machine, or the [Ultralytics Docker container](docker-quickstart.md); you can also use [Ultralytics Platform](../platform/quickstart.md). Here is how to export with Python and CLI:
+Yes. Run the export on Google Colab, an x86_64 Linux machine, or the [Ultralytics Docker container](https://docs.ultralytics.com/guides/docker-quickstart); you can also use [Ultralytics Platform](../platform/quickstart.md). Here is how to export with Python and CLI:
 
 !!! example "Exporting the model"
 

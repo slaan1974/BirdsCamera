@@ -219,8 +219,6 @@ my-yolo-project/
 │   └── model_wrapper.py  # Code interacting with YOLO
 ├── tests/                # Unit/integration tests
 ├── configs/              # YAML/JSON config files
-├── docker/               # Dockerfiles, if used
-│   └── Dockerfile
 └── .github/              # GitHub specific files (e.g., workflows for CI)
     └── workflows/
         └── ci.yml

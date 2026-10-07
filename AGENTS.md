@@ -1,3 +1,36 @@
+# Session Summary — Repo Recovery, Docker Removal & Documentation (October 2026)
+
+## Goal
+Continue the 4-phase plan recovered from session `ses_ee9f1c803ffeICiOf0RROArts5`: (1) restore repo, (2) remove Docker files, (3) documentation, (4) verify/commit/push. This session did Phase 2 (finished) and Phase 3 (README, PLAN.md, TEST.md, AGENTS.md).
+
+## What was done
+
+### Phase 2 — Docker removal ("files only" — embedded logic in `team1`/`cleanup.sh`/`support` untouched)
+- **19 files deleted:** `docker/` (14 Dockerfiles), `.dockerignore`, `.github/workflows/docker.yml`, `docs/en/guides/docker-quickstart.md`, `docs/en/guides/vertex-ai-deployment-with-docker.md`, `docs/en/yolov5/environments/docker-image-quickstart-tutorial.md`
+- `mkdocs.yml`: removed Docker icon + 3 nav entries (nav verified — no dangling entries)
+- 14 docs pages: 17 inbound references converted to external `docs.ultralytics.com` URLs / bullets removed
+- `PLAN.md` §11 tree: removed `docker/Dockerfile-arm64` and `docker-quickstart.md` lines; `CONTRIBUTING.md` + `docs/en/help/contributing.md`: removed `docker/` lines from example trees
+- Verified: zero local references to deleted paths; `./run-pi-tests.sh --static` → **82/82 passed**
+
+### Phase 3 — Documentation
+- **`README.md` rewritten for BirdsCamera** (was upstream Ultralytics): overview, features, hardware, repo layout table, quick start (`./team2 setup`), command table, wildlife detection + config table (`target_classes` phrased "default 0" — code truth, see discrepancy below), data drive, diagnostics, testing, "Docker Deployment Removed" section, docs table, OneDrive warning, license. Upstream README preserved as `README.upstream.md`. (`README.zh-CN.md` left as upstream Chinese — noted in report.)
+- **`PLAN.md`**: removed §4 "Option A: Docker" (promoted Manual Install), removed the Docker quickstart block from §12, replaced the §1 ARM64 Docker bullet with a "Docker removed" note, added legacy banners to Docker sections 14/15/16/19/20/25, added `## 29. Changelog` (3 entries) before Appendix A, appended `## Appendix B — Repository Investigation Findings (October 2026)` (7-findings table, 4-phase status table, warnings incl. "never keep git repos in OneDrive")
+- **`TEST.md`**: fixed stale grid rows (4.1 #16 → responsive `auto-fill minmax(220px,1fr)`, §7.3 fix text updated — GALLERY_HTML is responsive, INDEX_HTML still `repeat(10,1fr)`), added `## 8. Current Test Status & Findings (October 2026)`: per-suite counts (245 total), 82/82 re-verified date, 5 known limitations (no `test_integration.sh`, runner 0/0/0 summary bug, Docker test rows retained with rationale, CRLF shebang breakage on Windows + fix command, static suite also validates PLAN.md docs sections)
+- **`AGENTS.md`**: this summary prepended (previous session's summary kept below as history)
+
+### Findings worth remembering
+- **Repo archaeology**: prior-session plan recovered from `%APPDATA%/opencode/canonical-architecture/.../opencode.db` (copied to temp, queried with `sqlite3.py` / `q.py`) — DB contains sessions, todos, session titles
+- **PLAN.md headings use em dashes (`—`), not hyphens** — naive `## 14. ... - ...` edits fail; check exact chars (`python` `repr()`) when editing by heading
+- **Windows git config**: `core.autocrlf=true` from `C:/Program Files/Git/etc/gitconfig` → worktree CRLF but index LF; commits stay LF (no CRLF pollution). To run bash suites in WSL, normalize a copy first (existing pattern: temp copy → `sed -i 's/\r$//'` → run)
+- **Code/doc discrepancy (unresolved)**: `team2` `CONFIG_DEFAULTS["target_classes"] = [0]` (person only) vs PLAN.md §27 / usage text claiming default `0,15,16`
+
+## Next steps (Phase 4)
+- `git status`/`git diff` review → stage → commit → push to `main`
+- Consider `.gitattributes` (`*.sh`/extensionless scripts `eol=lf`) as a hardening fix
+- Optional: resolve `target_classes` default discrepancy; de-stub `README.zh-CN.md`
+
+---
+
 # Session Summary — Auto-Refresh Interval, Docs, Test Tooling
 
 ## Goal

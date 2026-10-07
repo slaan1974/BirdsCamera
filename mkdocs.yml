@@ -88,8 +88,6 @@ extra: # version:
       link: https://x.com/ultralytics
     - icon: fontawesome/brands/youtube
       link: https://youtube.com/ultralytics?sub_confirmation=1
-    - icon: fontawesome/brands/docker
-      link: https://hub.docker.com/r/ultralytics/ultralytics/
     - icon: fontawesome/brands/python
       link: https://pypi.org/project/ultralytics/
     - icon: fontawesome/brands/discord
@@ -529,8 +527,6 @@ nav:
       - Data Collection and Annotation: guides/data-collection-and-annotation.md
       - DeepStream on NVIDIA Jetson: guides/deepstream-nvidia-jetson.md
       - Define CV Project Goals: guides/defining-project-goals.md
-      - YOLO on Vertex AI: guides/vertex-ai-deployment-with-docker.md
-      - Docker Quickstart: guides/docker-quickstart.md
       - Edge TPU on Raspberry Pi: guides/coral-edge-tpu-on-raspberry-pi.md
       - End-to-End Detection: guides/end2end-detection.md
       - Export Non-YOLO Models: guides/export-non-yolo-models.md
@@ -573,7 +569,6 @@ nav:
               - Amazon Web Services (AWS): yolov5/environments/aws-quickstart-tutorial.md
               - Google Cloud (GCP): yolov5/environments/google-cloud-quickstart-tutorial.md
               - AzureML: yolov5/environments/azureml-quickstart-tutorial.md
-              - Docker Image: yolov5/environments/docker-image-quickstart-tutorial.md
           - Tutorials:
               - Train Custom Data: yolov5/tutorials/train-custom-data.md
               - Tips for Best Training Results: yolov5/tutorials/tips-for-best-training-results.md

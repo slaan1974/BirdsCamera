@@ -133,7 +133,7 @@ Ultralytics provides a range of ready-to-use environments, each pre-installed wi
 - **Google Cloud**: [GCP Quickstart Guide](../environments/google-cloud-quickstart-tutorial.md)
 - **Amazon**: [AWS Quickstart Guide](../environments/aws-quickstart-tutorial.md)
 - **Azure**: [AzureML Quickstart Guide](../environments/azureml-quickstart-tutorial.md)
-- **Docker**: [Docker Quickstart Guide](../environments/docker-image-quickstart-tutorial.md) <a href="https://hub.docker.com/r/ultralytics/yolov5"><img src="https://img.shields.io/docker/pulls/ultralytics/yolov5?logo=docker" alt="Docker Pulls"></a>
+- **Docker**: [Docker Quickstart Guide](https://docs.ultralytics.com/yolov5/environments/docker-image-quickstart-tutorial) <a href="https://hub.docker.com/r/ultralytics/yolov5"><img src="https://img.shields.io/docker/pulls/ultralytics/yolov5?logo=docker" alt="Docker Pulls"></a>
 
 ## Project Status
 
